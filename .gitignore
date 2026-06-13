@@ -1,0 +1,21 @@
+# Data files (large / private)
+**/*.jsonl
+**/*.pkl
+**/*.xlsx
+**/*.xls
+**/*.csv
+
+# Archive
+**/archive/
+
+# Environment
+.env
+**/__pycache__/
+**/*.pyc
+*.DS_Store
+
+# Summaries (optional — remove these lines if you want summaries on GitHub)
+# **/*_summary.txt
+
+# Pilot outputs (intermediate)
+**/scidqa_pilot_*_summary.txt
