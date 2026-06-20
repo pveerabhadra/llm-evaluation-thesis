@@ -266,7 +266,23 @@ def save_report(report_lines: list[str], lang: str) -> str:
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 
+class _Tee:
+    """Write to both stdout and a buffer simultaneously."""
+    def __init__(self, real_stdout):
+        import io
+        self._real = real_stdout
+        self._buf  = io.StringIO()
+    def write(self, s):
+        self._real.write(s)
+        self._buf.write(s)
+    def flush(self):
+        self._real.flush()
+    def getvalue(self):
+        return self._buf.getvalue()
+
+
 def main():
+    import sys
     parser = argparse.ArgumentParser(description="Combine and analyse MMLU result batches")
     parser.add_argument("--lang", choices=["en", "de"], default="en",
                         help="Language: en (English MMLU) or de (German MMLU)")
@@ -277,6 +293,11 @@ def main():
     lang       = args.lang
     result_dir = RESULT_DIRS[lang]
     patterns   = FILE_PATTERNS[lang]
+
+    # Capture all output for report file when --save is used
+    tee = _Tee(sys.stdout)
+    if args.save:
+        sys.stdout = tee
 
     lang_label = "English" if lang == "en" else "German"
     print(f"\n{'═' * 65}")
@@ -317,6 +338,11 @@ def main():
     print(f"  Total records analysed: {total_q:,}")
     print(f"  Run again after each batch to verify no duplicates crept in.")
     print(f"{'═' * 65}\n")
+
+    if args.save:
+        sys.stdout = tee._real
+        out = save_report(tee.getvalue().splitlines(), lang)
+        print(f"  → Report saved: {os.path.basename(out)}\n")
 
 
 if __name__ == "__main__":

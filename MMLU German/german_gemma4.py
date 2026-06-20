@@ -29,7 +29,7 @@ from tqdm import tqdm
 
 # ── API / model ────────────────────────────────────────────────────────────────
 
-LITELLM_BASE_URL = "https://litellm.uni-osnabrueck.de/v1"
+LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL", "https://litellm.uni-osnabrueck.de/v1")
 LITELLM_API_KEY  = os.getenv("LITELLM_API_KEY", "")
 MODEL_NAME       = "RedHatAI/gemma-4-31B-it-FP8-Dynamic"
 

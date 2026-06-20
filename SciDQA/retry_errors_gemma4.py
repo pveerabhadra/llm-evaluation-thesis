@@ -34,7 +34,7 @@ from rank_bm25 import BM25Okapi
 from sentence_transformers import SentenceTransformer
 
 # ── Credentials / config (same as scidqa_gemma4.py) ───────────────────────────
-LITELLM_BASE_URL   = "https://litellm.uni-osnabrueck.de/v1"
+LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL", "https://litellm.uni-osnabrueck.de/v1")
 LITELLM_API_KEY  = os.getenv("LITELLM_API_KEY", "")
 MODEL_NAME         = "RedHatAI/gemma-4-31B-it-FP8-Dynamic"
 RATE_LIMIT         = 100          # conservative for retries

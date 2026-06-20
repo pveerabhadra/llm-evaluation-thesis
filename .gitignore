@@ -14,8 +14,19 @@
 **/*.pyc
 *.DS_Store
 
-# Summaries (optional — remove these lines if you want summaries on GitHub)
-# **/*_summary.txt
+# Batch-run summaries and intermediate logs (generated, not source)
+**/*_summary.txt
 
-# Pilot outputs (intermediate)
-**/scidqa_pilot_*_summary.txt
+# Batch state files (runtime checkpoints)
+**/batch_state*.json
+
+# Generated analysis reports and per-model judge text files
+analysis/*_report.txt
+analysis/scidqa_llm_judge_*.txt
+analysis/scidqa_llm_judge_self_*.txt
+
+# Cursor IDE internals
+.cursor/
+
+# Thesis writing (managed separately via Overleaf)
+writing/

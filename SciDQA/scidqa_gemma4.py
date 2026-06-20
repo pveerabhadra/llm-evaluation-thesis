@@ -1,20 +1,3 @@
-"""
-SciDQA Full Evaluation — Gemma-4 31B (FP8)
-============================================
-Evaluates questions under five conditions:
-  1. no_retrieval  – closed-book (model's parametric knowledge)
-  2. rag_top3      – top-3 BM25 chunks (replicates SciDQA paper baseline)
-  3. rag_top5      – top-5 BM25 chunks (extended baseline)
-  4. rag_dense     – top-3 chunks via dense semantic retrieval (thesis extension)
-  5. long_context  – full paper text (up to 140 000 chars)
-
-Usage:
-  python3 scidqa_gemma4.py                        # questions 0-499
-  python3 scidqa_gemma4.py --offset 500 --n 500   # questions 500-999
-
-Exits with code 1 immediately on any critical API error (401, 404).
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -56,7 +39,7 @@ except ImportError:
 
 
 # ── Credentials ────────────────────────────────────────────────────────────────
-LITELLM_BASE_URL = "https://litellm.uni-osnabrueck.de/v1"
+LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL", "https://litellm.uni-osnabrueck.de/v1")
 LITELLM_API_KEY  = os.getenv("LITELLM_API_KEY", "")
 MODEL_NAME       = "RedHatAI/gemma-4-31B-it-FP8-Dynamic"
 

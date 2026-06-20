@@ -56,7 +56,7 @@ except ImportError:
 
 
 # ── Credentials ────────────────────────────────────────────────────────────────
-LITELLM_BASE_URL = "https://litellm.uni-osnabrueck.de/v1"
+LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL", "https://litellm.uni-osnabrueck.de/v1")
 LITELLM_API_KEY  = os.getenv("LITELLM_API_KEY", "")
 MODEL_NAME       = "openai/gpt-oss-120b"
 
