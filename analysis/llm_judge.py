@@ -1,37 +1,3 @@
-"""
-llm_judge.py
-------------
-Cross-reference LLM-as-judge evaluation for SciDQA.
-
-Design:
-  Each model judges the OTHER TWO models' outputs — never its own.
-  Every answer receives exactly 2 independent judgments (averaged = ALS score).
-
-  Gemma-4  judges: GPT-OSS answers + Qwen answers
-  GPT-OSS  judges: Gemma-4 answers + Qwen answers
-  Qwen 3.5 judges: Gemma-4 answers + GPT-OSS answers
-
-Dimensions (1–10 each, from SciDQA paper prompt):
-  Relevance, Accuracy, Completeness, Conciseness
-  Overall = average of 4 dimension scores
-
-Output:
-  analysis/scidqa_llm_judge.jsonl        — one record per (question, condition, answer_model, judge_model)
-  analysis/scidqa_llm_judge_report.txt   — summary ALS scores per model × condition
-
-Usage:
-  cd analysis && python3 llm_judge.py           # resume from last stop (default)
-  python3 llm_judge.py --judge gemma4           # only use Gemma-4 as judge
-  python3 llm_judge.py --condition rag_top3     # one condition only
-  python3 llm_judge.py --dedupe                 # compact JSONL (keep best record per key)
-
-Resume behaviour:
-  Skips any (id, condition, answer_model, judge) that produced a successful judgment
-  (all 4 dimension scores parsed). Retries both API errors AND score-parse failures.
-  New lines are appended to the same JSONL; the report always deduplicates first,
-  keeping the best record per key. Run --dedupe to compact the raw file afterward.
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -50,11 +16,9 @@ from openai import OpenAI
 from tqdm import tqdm
 
 
-# ── Credentials ────────────────────────────────────────────────────────────────
-LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL", "https://litellm.uni-osnabrueck.de/v1")
-LITELLM_API_KEY  = os.getenv("LITELLM_API_KEY",  "sk-12_MUp73XhwdRhvdxJZy3w")
+LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL")
+LITELLM_API_KEY  = os.getenv("LITELLM_API_KEY")
 
-# ── Model registry ─────────────────────────────────────────────────────────────
 MODELS = {
     "gemma4"  : {"name": "RedHatAI/gemma-4-31B-it-FP8-Dynamic", "rate": 180, "workers": 30, "max_tokens": 1024},
     "gptoss"  : {"name": "openai/gpt-oss-120b",                  "rate": 180, "workers": 25, "max_tokens": 1024},
@@ -76,7 +40,6 @@ LABEL_TO_KEY = {
     "Qwen3.5-122B" : "qwen3.5",
 }
 
-# ── Paths ──────────────────────────────────────────────────────────────────────
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 COMBINED_FILES = {
@@ -87,52 +50,8 @@ COMBINED_FILES = {
 
 ALL_CONDITIONS = ["no_retrieval", "rag_top3", "rag_top5", "rag_dense", "long_context"]
 
-# ── CLI ────────────────────────────────────────────────────────────────────────
-parser = argparse.ArgumentParser(description="LLM-as-judge for SciDQA")
-parser.add_argument("--judge",      choices=list(MODELS), default=None,
-                    help="Only use this model as judge (default: all)")
-parser.add_argument("--condition",  choices=ALL_CONDITIONS, default=None,
-                    help="Score one condition only (default: all)")
-parser.add_argument("--self-judge", action="store_true",
-                    help="Each model judges its OWN answers (self-bias check). "
-                         "Writes to separate files scidqa_llm_judge_self.*")
-parser.add_argument("--dedupe", action="store_true",
-                    help="Rewrite output JSONL keeping the best record per "
-                         "(id, condition, answer_model, judge) and exit.")
-args = parser.parse_args()
-
-JUDGE_FILTER     = args.judge
-CONDITIONS_TO_DO = [args.condition] if args.condition else ALL_CONDITIONS
-SELF_JUDGE_MODE  = args.self_judge
-
-# Paths switch based on mode
-if SELF_JUDGE_MODE:
-    OUTPUT_JSONL        = os.path.join(SCRIPT_DIR, "scidqa_llm_judge_self.jsonl")
-    OUTPUT_REPORT       = os.path.join(SCRIPT_DIR, "scidqa_llm_judge_self_report.txt")
-    OUTPUT_REPORT_PER_MODEL = {
-        "gemma4"  : os.path.join(SCRIPT_DIR, "scidqa_llm_judge_self_gemma4.txt"),
-        "gptoss"  : os.path.join(SCRIPT_DIR, "scidqa_llm_judge_self_gptoss.txt"),
-        "qwen3.5" : os.path.join(SCRIPT_DIR, "scidqa_llm_judge_self_qwen3.5.txt"),
-    }
-    # Self-judge map: each model judges only its own answers
-    JUDGE_MAP_EFFECTIVE = {
-        "gemma4"  : ["gemma4"],
-        "gptoss"  : ["gptoss"],
-        "qwen3.5" : ["qwen3.5"],
-    }
-else:
-    OUTPUT_JSONL        = os.path.join(SCRIPT_DIR, "scidqa_llm_judge.jsonl")
-    OUTPUT_REPORT       = os.path.join(SCRIPT_DIR, "scidqa_llm_judge_report.txt")
-    OUTPUT_REPORT_PER_MODEL = {
-        "gemma4"  : os.path.join(SCRIPT_DIR, "scidqa_llm_judge_gemma4.txt"),
-        "gptoss"  : os.path.join(SCRIPT_DIR, "scidqa_llm_judge_gptoss.txt"),
-        "qwen3.5" : os.path.join(SCRIPT_DIR, "scidqa_llm_judge_qwen3.5.txt"),
-    }
-    JUDGE_MAP_EFFECTIVE = JUDGE_MAP
-
 client = OpenAI(base_url=LITELLM_BASE_URL, api_key=LITELLM_API_KEY)
 
-# ── Judge prompt — exact SciDQA paper prompt (Appendix B.3, Figure 12) ─────────
 # The paper uses a single unified prompt (not split into system/user).
 # We use an empty system message and place the full prompt in the user turn
 # to stay as close as possible to the original.
@@ -166,7 +85,6 @@ def build_judge_prompt(question: str, model_answer: str, gold_answer: str) -> st
         f"Model Answer: {model_answer}"
     )
 
-# ── Score parser ───────────────────────────────────────────────────────────────
 def parse_scores(text: str) -> dict:
     """Extract dimension scores and overall from judge response."""
     if not text:
@@ -201,7 +119,6 @@ def parse_scores(text: str) -> dict:
         "dims_parsed"  : len(dims),
     }
 
-# ── Per-judge rate limiters ────────────────────────────────────────────────────
 _rate_limiters: dict[str, object] = {}
 
 class RateLimiter:
@@ -226,7 +143,6 @@ for key, cfg in MODELS.items():
 
 write_lock = threading.Lock()
 
-# ── Record helpers ─────────────────────────────────────────────────────────────
 
 def task_key(record: dict) -> tuple:
     return (
@@ -301,7 +217,6 @@ def append_record(path: str, record: dict) -> None:
             fh.flush()
             os.fsync(fh.fileno())
 
-# ── API call ───────────────────────────────────────────────────────────────────
 def call_judge(judge_key: str, question: str,
                model_answer: str, gold_answer: str,
                retries: int = 3) -> dict:
@@ -358,8 +273,7 @@ def call_judge(judge_key: str, question: str,
 
     return {"text": None, "latency": 0, "error": "unknown"}
 
-# ── Worker ─────────────────────────────────────────────────────────────────────
-def judge_one(task: dict) -> Optional[dict]:
+def judge_one(task: dict, output_jsonl: str) -> Optional[dict]:
     response = call_judge(
         task["judge_key"],
         task["question"],
@@ -386,11 +300,10 @@ def judge_one(task: dict) -> Optional[dict]:
         "judge_response"   : response["text"],
     }
 
-    append_record(OUTPUT_JSONL, record)
+    append_record(output_jsonl, record)
     return record
 
-# ── Load answers ───────────────────────────────────────────────────────────────
-def load_answers() -> list[dict]:
+def load_answers(conditions: list[str]) -> list[dict]:
     answers = []
     for model_label, fpath in COMBINED_FILES.items():
         if not os.path.exists(fpath):
@@ -402,7 +315,7 @@ def load_answers() -> list[dict]:
                 if not line.strip():
                     continue
                 r = json.loads(line)
-                if r.get("condition") not in CONDITIONS_TO_DO:
+                if r.get("condition") not in conditions:
                     continue
                 if r.get("error") or not r.get("response_text") or not r.get("gold_answer"):
                     continue
@@ -416,34 +329,76 @@ def load_answers() -> list[dict]:
                 })
     return answers
 
-# ── Main ───────────────────────────────────────────────────────────────────────
 def main():
+    if not LITELLM_BASE_URL or not LITELLM_API_KEY:
+        print("[ERROR] LITELLM_BASE_URL and LITELLM_API_KEY must be set as environment variables.")
+        print("  Copy .env.example to .env and fill in your values.")
+        sys.exit(1)
+
+    parser = argparse.ArgumentParser(description="LLM-as-judge for SciDQA")
+    parser.add_argument("--judge",      choices=list(MODELS), default=None,
+                        help="Only use this model as judge (default: all)")
+    parser.add_argument("--condition",  choices=ALL_CONDITIONS, default=None,
+                        help="Score one condition only (default: all)")
+    parser.add_argument("--self-judge", action="store_true",
+                        help="Each model judges its OWN answers (self-bias check). "
+                             "Writes to separate files scidqa_llm_judge_self.*")
+    parser.add_argument("--dedupe", action="store_true",
+                        help="Rewrite output JSONL keeping the best record per "
+                             "(id, condition, answer_model, judge) and exit.")
+    args = parser.parse_args()
+
+    judge_filter     = args.judge
+    conditions       = [args.condition] if args.condition else ALL_CONDITIONS
+    self_judge_mode  = args.self_judge
+
+    if self_judge_mode:
+        output_jsonl        = os.path.join(SCRIPT_DIR, "scidqa_llm_judge_self.jsonl")
+        output_report       = os.path.join(SCRIPT_DIR, "scidqa_llm_judge_self_report.txt")
+        output_report_per_model = {
+            "gemma4"  : os.path.join(SCRIPT_DIR, "scidqa_llm_judge_self_gemma4.txt"),
+            "gptoss"  : os.path.join(SCRIPT_DIR, "scidqa_llm_judge_self_gptoss.txt"),
+            "qwen3.5" : os.path.join(SCRIPT_DIR, "scidqa_llm_judge_self_qwen3.5.txt"),
+        }
+        judge_map_effective = {
+            "gemma4"  : ["gemma4"],
+            "gptoss"  : ["gptoss"],
+            "qwen3.5" : ["qwen3.5"],
+        }
+    else:
+        output_jsonl        = os.path.join(SCRIPT_DIR, "scidqa_llm_judge.jsonl")
+        output_report       = os.path.join(SCRIPT_DIR, "scidqa_llm_judge_report.txt")
+        output_report_per_model = {
+            "gemma4"  : os.path.join(SCRIPT_DIR, "scidqa_llm_judge_gemma4.txt"),
+            "gptoss"  : os.path.join(SCRIPT_DIR, "scidqa_llm_judge_gptoss.txt"),
+            "qwen3.5" : os.path.join(SCRIPT_DIR, "scidqa_llm_judge_qwen3.5.txt"),
+        }
+        judge_map_effective = JUDGE_MAP
+
     if args.dedupe:
-        records = load_output_records(OUTPUT_JSONL)
+        records = load_output_records(output_jsonl)
         if not records:
-            print(f"  No records in {os.path.basename(OUTPUT_JSONL)}")
+            print(f"  No records in {os.path.basename(output_jsonl)}")
             return
         deduped, removed = dedupe_records(records)
-        write_jsonl_atomic(OUTPUT_JSONL, deduped)
-        print(f"  Deduped {os.path.basename(OUTPUT_JSONL)}")
+        write_jsonl_atomic(output_jsonl, deduped)
+        print(f"  Deduped {os.path.basename(output_jsonl)}")
         print(f"    Before : {len(records):,} lines")
         print(f"    After  : {len(deduped):,} lines")
         print(f"    Removed: {removed:,} stale duplicate/failed lines")
         return
 
-    mode_label = "Self-Judge (bias check)" if SELF_JUDGE_MODE else "Cross-Reference"
+    mode_label = "Self-Judge (bias check)" if self_judge_mode else "Cross-Reference"
     print(f"\n{'═'*65}")
     print(f"  SciDQA — LLM-as-Judge  [{mode_label}]")
-    print(f"  Conditions  : {CONDITIONS_TO_DO}")
-    print(f"  Judge filter: {JUDGE_FILTER or 'all'}")
-    print(f"  Output file : {OUTPUT_JSONL}")
-    if SELF_JUDGE_MODE:
+    print(f"  Conditions  : {conditions}")
+    print(f"  Judge filter: {judge_filter or 'all'}")
+    print(f"  Output file : {output_jsonl}")
+    if self_judge_mode:
         print(f"  Mode: each model judges its OWN answers")
     print(f"{'═'*65}\n")
 
-    # Load existing output — skip only records that produced successful judgments
-    # (all 4 dimension scores parsed). Both API errors and parse failures are retried.
-    existing_records = load_output_records(OUTPUT_JSONL)
+    existing_records = load_output_records(output_jsonl)
     already_done: set[tuple] = set()
     for record in existing_records:
         if is_successful_judgment(record):
@@ -455,22 +410,21 @@ def main():
             if not r.get("error") and not is_successful_judgment(r)
         )
         n_api_errors = sum(1 for r in existing_records if r.get("error"))
-        print(f"  Resuming from {os.path.basename(OUTPUT_JSONL)}")
+        print(f"  Resuming from {os.path.basename(output_jsonl)}")
         print(f"    Already done (successful)  : {len(already_done):,}")
         print(f"    API errors (will retry)    : {n_api_errors:,}")
         print(f"    Parse failures (will retry): {n_parse_fail:,}")
         print(f"    Total lines in file        : {len(existing_records):,}\n")
 
     print("  Loading answers from combined JSONL files...")
-    answers = load_answers()
+    answers = load_answers(conditions)
     print(f"  Loaded {len(answers):,} answers\n")
 
-    # Build task list
     tasks: list[dict] = []
     for ans in answers:
-        judge_keys = JUDGE_MAP_EFFECTIVE[ans["answer_model_key"]]
+        judge_keys = judge_map_effective[ans["answer_model_key"]]
         for jk in judge_keys:
-            if JUDGE_FILTER and jk != JUDGE_FILTER:
+            if judge_filter and jk != judge_filter:
                 continue
             key = (ans["id"], ans["condition"], ans["answer_model_key"], jk)
             if key in already_done:
@@ -486,10 +440,9 @@ def main():
         print(f"  Est. time    : ~{est_min:.0f} min at 180 req/min avg\n")
 
         all_records: list[dict] = []
-        # Use combined worker pool — per-judge rate limiters handle throttling
         max_workers = 40
         with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
-            futures = {ex.submit(judge_one, t): t for t in tasks}
+            futures = {ex.submit(judge_one, t, output_jsonl): t for t in tasks}
             for future in tqdm(concurrent.futures.as_completed(futures),
                                total=len(futures), desc="Judging"):
                 try:
@@ -501,9 +454,8 @@ def main():
                 except Exception as e:
                     print(f"\n  Worker error: {e}")
 
-    # ── Build report from deduplicated output ──────────────────────────────────
     print("\n  Building report from output file...")
-    all_records_raw = load_output_records(OUTPUT_JSONL)
+    all_records_raw = load_output_records(output_jsonl)
     all_records, n_dupes = dedupe_records(all_records_raw)
     if n_dupes:
         print(f"  Note: {n_dupes:,} duplicate/stale lines ignored in report "
@@ -520,6 +472,7 @@ def main():
     answer_keys = ["gemma4", "gptoss", "qwen3.5"]
     labels      = {"gemma4": "gemma-4-31B", "gptoss": "gpt-oss-120b", "qwen3.5": "Qwen3.5-122B"}
     DIMS        = ["relevance", "accuracy", "completeness", "conciseness"]
+    CONDITIONS_TO_DO = conditions
 
     def norm(v: float) -> float:
         return round(v * 10, 1)
@@ -533,14 +486,12 @@ def main():
 
     grouped_overall = group_by("overall")
 
-    # ══════════════════════════════════════════════════════════════════════════
     p(f"{'═'*70}")
     p(f"  SciDQA — LLM-as-Judge Evaluation Report")
     p(f"  Cross-reference judging  |  Scale: 1–100  |  Avg of 2 judges per answer")
     p(f"{'═'*70}")
     p()
 
-    # ── SECTION 1: Overall ALS per model (headline number) ────────────────────
     p(f"{'─'*70}")
     p(f"  SECTION 1 — Overall ALS per Model (averaged across all conditions)")
     p(f"  The single headline number. Higher = better overall answer quality.")
@@ -556,7 +507,6 @@ def main():
             p(f"  {labels[k]:<22}  {'—':>12}  {'0':>13}")
     p()
 
-    # ── SECTION 2: ALS per condition — matches SciDQA paper table ─────────────
     p(f"{'─'*70}")
     p(f"  SECTION 2 — ALS Score by Condition  (matches SciDQA paper Table 5)")
     p(f"  Which RAG setup produced the best answers for each model?")
@@ -575,7 +525,6 @@ def main():
         p(row)
     p()
 
-    # ── SECTION 3: Per-dimension averaged across all conditions ───────────────
     p(f"{'─'*70}")
     p(f"  SECTION 3 — Per-Dimension Scores averaged across all conditions")
     p(f"  Where is each model strong or weak?")
@@ -593,7 +542,6 @@ def main():
         p(row)
     p()
 
-    # ── SECTION 4: Full dimension × condition breakdown ────────────────────────
     p(f"{'─'*70}")
     p(f"  SECTION 4 — Per-Dimension × Condition (full detail)")
     p(f"{'─'*70}")
@@ -610,7 +558,6 @@ def main():
             p(row)
         p()
 
-    # ── SECTION 5: Per-judge scores (did the two judges agree?) ───────────────
     p(f"{'─'*70}")
     p(f"  SECTION 5 — Scores Given BY Each Judge")
     p(f"  If two judges give very different averages, treat results with caution.")
@@ -628,7 +575,6 @@ def main():
             p(f"  {labels[jk]:<22}  {'—':>15}  {'0':>13}")
     p()
 
-    # ── SECTION 6: Data quality and error summary ─────────────────────────────
     p(f"{'─'*70}")
     p(f"  SECTION 6 — Data Quality & Error Summary")
     p(f"{'─'*70}")
@@ -644,7 +590,6 @@ def main():
     p(f"  Score parse failures         : {n_parse_fail:,}  ({100*n_parse_fail/max(total,1):.1f}%)")
     p()
 
-    # Error type breakdown (extract HTTP code from error string)
     error_codes: dict[str, int] = defaultdict(int)
     for r in all_records:
         if r.get("error"):
@@ -664,7 +609,6 @@ def main():
             p(f"    HTTP {code} : {cnt:>5,}  — {note}")
         p()
 
-    # Errors by judge model
     p(f"  Errors by Judge Model:")
     p(f"  {'Judge':<22}  {'API errors':>10}  {'Parse fails':>12}  {'Successful':>10}")
     p(f"  {'─'*22}  {'─'*10}  {'─'*12}  {'─'*10}")
@@ -676,7 +620,6 @@ def main():
         p(f"  {labels[jk]:<22}  {j_err:>10,}  {j_parse:>12,}  {j_ok:>10,}")
     p()
 
-    # Errors by answer model (which model's answers caused judge failures)
     p(f"  Errors by Answer Model:")
     p(f"  {'Answer model':<22}  {'API errors':>10}  {'Parse fails':>12}  {'Successful':>10}")
     p(f"  {'─'*22}  {'─'*10}  {'─'*12}  {'─'*10}")
@@ -690,10 +633,9 @@ def main():
     p(f"  Raw 1–10 scores in JSONL. Report values = raw × 10.")
     p(f"{'═'*70}")
 
-    with open(OUTPUT_REPORT, "w") as f:
+    with open(output_report, "w") as f:
         f.write("\n".join(report_lines) + "\n")
 
-    # ── Per-model reports ──────────────────────────────────────────────────────
     for model_key in answer_keys:
         model_records = [r for r in good_records if r["answer_model_key"] == model_key]
         label         = labels[model_key]
@@ -710,7 +652,6 @@ def main():
         pm(f"{'═'*65}")
         pm()
 
-        # ALS per condition
         pm(f"  Overall ALS per Condition:")
         pm(f"  {'Condition':<17}  {'ALS':>7}  {'# samples':>10}")
         pm(f"  {'─'*17}  {'─'*7}  {'─'*10}")
@@ -726,7 +667,6 @@ def main():
            if overall_all else f"  {'ALL CONDITIONS':<17}  {'—':>7}  {'0':>10}")
         pm()
 
-        # Per-dimension summary
         pm(f"  Per-Dimension Scores (averaged across all conditions):")
         pm(f"  {'Dimension':<15}  {'Score':>7}")
         pm(f"  {'─'*15}  {'─'*7}")
@@ -736,7 +676,6 @@ def main():
                else f"  {dim.capitalize():<15}  {'—':>7}")
         pm()
 
-        # Per-dimension × condition
         pm(f"  Per-Dimension × Condition:")
         dim_header = "".join(f" {d[:11]:>11}" for d in ["Relevance", "Accuracy", "Complete.", "Concise."])
         pm(f"  {'Condition':<17}{dim_header}")
@@ -750,7 +689,6 @@ def main():
             pm(row)
         pm()
 
-        # Scores from each judge separately
         pm(f"  Scores by Individual Judge:")
         pm(f"  {'Judge':<22}  {'Avg score':>9}  {'# judgments':>12}")
         pm(f"  {'─'*22}  {'─'*9}  {'─'*12}")
@@ -765,12 +703,12 @@ def main():
         pm()
         pm(f"{'═'*65}")
 
-        with open(OUTPUT_REPORT_PER_MODEL[model_key], "w") as f:
+        with open(output_report_per_model[model_key], "w") as f:
             f.write("\n".join(lines) + "\n")
 
-    print(f"\n  → Saved JSONL       : {os.path.basename(OUTPUT_JSONL)}")
-    print(f"  → Saved combined    : {os.path.basename(OUTPUT_REPORT)}")
-    for k, path in OUTPUT_REPORT_PER_MODEL.items():
+    print(f"\n  → Saved JSONL       : {os.path.basename(output_jsonl)}")
+    print(f"  → Saved combined    : {os.path.basename(output_report)}")
+    for k, path in output_report_per_model.items():
         print(f"  → Saved {labels[k]:<18}: {os.path.basename(path)}")
     print()
 

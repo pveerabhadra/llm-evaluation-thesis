@@ -1,36 +1,3 @@
-"""
-dataset.py
-----------
-Downloads and loads the SciDQA Reading Comprehension dataset from OSF.
-Source: https://osf.io/3g2hn/overview  (shared by the SciDQA authors)
-
-Dataset structure (once downloaded to ./data/):
-───────────────────────────────────────────────
-SciDQADataset.xlsx          2937 QA pairs with paper references
-  Columns: id, year, venue, rid, pid, decision, que, ans, version
-
-papers_fulltext_nougat.pkl  Full paper texts (Nougat OCR, Markdown format)
-  Structure: dict['initial' | 'final'][pid] → str (paper text)
-  'initial' = pre-review version, 'final' = accepted version
-
-relevant_pft.pkl            Structured paper metadata + sections per paper
-  Structure: dict[pid] → {'name', 'metadata': {sections, refs, ...}, 'year', 'conf'}
-
-relevant_ptabs.pkl          Relevant tables per paper
-  Structure: dict[pid] → {...}
-
-SciDQA_MuliDocQA.xlsx       316 multi-document QA pairs (separate task)
-
-Linking questions to paper text:
-  version_key = 'initial' if row['version'] == 'Initial' else 'final'
-  paper_text  = fulltext[version_key][row['pid']]
-
-Usage:
-  python3 dataset.py                # download + inspect structure
-  python3 dataset.py --no-download  # inspect already-downloaded files only
-  python3 dataset.py --sample 3     # show 3 example QA + paper text pairs
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -42,7 +9,6 @@ import urllib.request
 
 import pandas as pd
 
-# ── OSF download URLs ──────────────────────────────────────────────────────────
 OSF_FILES = {
     "SciDQADataset.xlsx"         : "https://osf.io/download/bvpjw/",
     "SciDQA_MuliDocQA.xlsx"      : "https://osf.io/download/h9uym/",
@@ -58,8 +24,6 @@ DATA_DIR   = os.path.join(SCRIPT_DIR, "data")
 # Maps dataset 'version' column → fulltext dict key
 VERSION_MAP = {"Initial": "initial", "Revised": "final"}
 
-
-# ── Download ───────────────────────────────────────────────────────────────────
 
 def _progress_hook(filename: str):
     def hook(block_num, block_size, total_size):
@@ -89,8 +53,6 @@ def download_files(skip_existing: bool = True) -> None:
         except Exception as e:
             print(f"  [ERROR] Failed to download {fname}: {e}")
 
-
-# ── Loaders ────────────────────────────────────────────────────────────────────
 
 def load_dataset() -> pd.DataFrame:
     """Load the main SciDQA QA pairs (2937 rows)."""
@@ -129,8 +91,6 @@ def load_multidoc() -> pd.DataFrame:
     return pd.read_excel(os.path.join(DATA_DIR, "SciDQA_MuliDocQA.xlsx"))
 
 
-# ── Main accessor: get paper text for a question row ──────────────────────────
-
 def get_paper_text(row: pd.Series, fulltext: dict) -> str | None:
     """
     Given a dataset row and the fulltext dict, return the paper text.
@@ -150,8 +110,6 @@ def get_structured_sections(row: pd.Series, pft: dict) -> list:
         return []
     return entry.get("metadata", {}).get("sections", [])
 
-
-# ── Inspection ─────────────────────────────────────────────────────────────────
 
 def inspect_all() -> None:
     df       = load_dataset()
@@ -220,8 +178,6 @@ def show_samples(n: int = 3) -> None:
             print("  Paper: [not found]")
     print("─" * 65)
 
-
-# ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser()

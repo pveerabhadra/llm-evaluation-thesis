@@ -1,18 +1,3 @@
-"""
-Master SciDQA Runner — all 3 models, fully automatic.
-======================================================
-Runs each model batch-by-batch (500 questions), in order:
-  1. Gemma-4   (resumes from where it left off if already started)
-  2. GPT-OSS   (resumes from where it left off if already started)
-  3. Qwen 3.5  (resumes from where it left off if already started)
-
-Each model stops at error and the whole pipeline stops.
-Re-run at any time to resume from the last completed batch.
-
-Usage:
-  caffeinate python3 run_all_scidqa.py
-"""
-
 import json
 import os
 import subprocess
@@ -24,7 +9,6 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 TOTAL_QUESTIONS = 2937
 BATCH_SIZE      = 500
 
-# ── Model pipeline definition ──────────────────────────────────────────────────
 MODELS = [
     {
         "name"      : "Gemma-4",
@@ -43,7 +27,6 @@ MODELS = [
     },
 ]
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
 def load_state(state_file: str) -> dict:
     if os.path.exists(state_file):
         with open(state_file) as f:
@@ -120,7 +103,6 @@ def run_model(model: dict, batches: list[tuple[int, int]]) -> bool:
 
     return True
 
-# ── Main ───────────────────────────────────────────────────────────────────────
 def main():
     batches = build_batches()
 

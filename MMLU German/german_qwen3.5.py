@@ -1,15 +1,3 @@
-"""
-german_qwen3.5.py  —  German MMLU  —  Qwen3.5-122B
--------------------------------------------------
-Dataset : openai/MMMLU (DE_DE) — 14,042 questions, 57 subjects, professional translation.
-Model   : Qwen/Qwen3.5-122B-A10B-FP8
-Output  : mmlu_de_qwen3.5_v{N}.jsonl  +  mmlu_de_gemma4_v{N}_summary.txt
-
-Batch size mirrors English runs: MMLU_N=1000 (~17 questions/subject × 57 subjects).
-Advance offset between batches with MMLU_OFFSET env var (0, 17, 34, 51 …).
-Set MMLU_PROMPT_LANG=en to run the English-prompt ablation condition.
-"""
-
 from __future__ import annotations
 
 import glob
@@ -27,27 +15,23 @@ from datasets import load_dataset
 from openai import OpenAI
 from tqdm import tqdm
 
-# ── API / model ────────────────────────────────────────────────────────────────
 
-LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL", "https://litellm.uni-osnabrueck.de/v1")
+LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL")
 LITELLM_API_KEY  = os.getenv("LITELLM_API_KEY", "")
 MODEL_NAME       = "Qwen/Qwen3.5-122B-A10B-FP8"
 
 client = OpenAI(base_url=LITELLM_BASE_URL, api_key=LITELLM_API_KEY)
 
-# ── Dataset ────────────────────────────────────────────────────────────────────
 
 DATASET_NAME = os.environ.get("MMLU_DATASET", "openai/MMMLU")
 DATASET_LANG = "DE_DE"
 
-# ── Run parameters ─────────────────────────────────────────────────────────────
 
 N_QUESTIONS     = int(os.environ.get("MMLU_N",      1000))
 QUESTION_OFFSET = int(os.environ.get("MMLU_OFFSET",    0))
 MAX_WORKERS     = 40
 RATE_LIMIT      = 100
 
-# ── Prompt language ────────────────────────────────────────────────────────────
 
 PROMPT_LANGUAGE = os.environ.get("MMLU_PROMPT_LANG", "de")
 
@@ -72,7 +56,6 @@ if PROMPT_LANGUAGE not in SYSTEM_PROMPTS:
 
 SYSTEM_PROMPT = SYSTEM_PROMPTS[PROMPT_LANGUAGE]
 
-# ── MMLU meta-categories (Hendrycks et al. 2021) ──────────────────────────────
 
 MMLU_CATEGORY = {
     "abstract_algebra": "STEM", "anatomy": "STEM", "astronomy": "STEM",
@@ -107,7 +90,6 @@ MMLU_CATEGORY = {
     "virology": "Other",
 }
 
-# ── Subjects ───────────────────────────────────────────────────────────────────
 
 SUBJECTS = [
     "abstract_algebra", "anatomy", "astronomy", "business_ethics",
@@ -131,7 +113,6 @@ SUBJECTS = [
     "virology", "world_religions",
 ]
 
-# ── Output paths ───────────────────────────────────────────────────────────────
 
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _BASE       = "mmlu_de_qwen3.5"
@@ -151,7 +132,6 @@ _RUN_NAME    = _next_version(_BASE)
 OUTPUT_FILE  = os.path.join(_SCRIPT_DIR, f"{_RUN_NAME}.jsonl")
 SUMMARY_FILE = os.path.join(_SCRIPT_DIR, f"{_RUN_NAME}_summary.txt")
 
-# ── Rate limiter ───────────────────────────────────────────────────────────────
 
 class RateLimiter:
     def __init__(self, max_per_minute: int):
@@ -171,7 +151,6 @@ class RateLimiter:
 rate_limiter = RateLimiter(RATE_LIMIT)
 write_lock   = threading.Lock()
 
-# ── Dataset loading ────────────────────────────────────────────────────────────
 
 def _normalize_subject(raw: str) -> str:
     return raw.strip().lower().replace(" ", "_").replace("-", "_")
@@ -295,14 +274,12 @@ def load_mmlu_de_sample(subjects: list[str], n: int, offset: int = 0) -> list[di
     print(f"  Loaded {len(samples)} questions.\n")
     return samples[:n]
 
-# ── Prompt builder ─────────────────────────────────────────────────────────────
 
 def build_prompt(question: str, choices: list[str]) -> str:
     labels       = ["A", "B", "C", "D"]
     choices_text = "\n".join(f"{l}. {t}" for l, t in zip(labels, choices))
     return f"Frage: {question}\n\n{choices_text}"
 
-# ── Model call ─────────────────────────────────────────────────────────────────
 
 def call_model(prompt: str, retries: int = 3) -> dict:
     for attempt in range(retries):
@@ -351,7 +328,6 @@ def call_model(prompt: str, retries: int = 3) -> dict:
 
     return {"text": None, "latency": None, "tokens": {}, "error": "max retries exceeded"}
 
-# ── Answer parser ──────────────────────────────────────────────────────────────
 
 def parse_answer_letter(response_text: str | None) -> tuple[str | None, str]:
     if not response_text:
@@ -386,7 +362,6 @@ def parse_answer_letter(response_text: str | None) -> tuple[str | None, str]:
             return m.group(1).upper(), "regex"
     return None, "failed"
 
-# ── Per-question evaluation ────────────────────────────────────────────────────
 
 def evaluate_question(args: tuple) -> dict:
     i, q     = args
@@ -429,7 +404,6 @@ def evaluate_question(args: tuple) -> dict:
 
     return record
 
-# ── Main evaluation loop ───────────────────────────────────────────────────────
 
 def run_evaluation():
     per_subject = max(1, N_QUESTIONS // len(SUBJECTS))

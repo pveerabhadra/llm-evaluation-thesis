@@ -1,26 +1,3 @@
-"""
-run_batches_german.py
----------------------
-Runs German MMLU evaluations in sequence across all 3 models, tracking progress
-so the same questions are never repeated across batches.
-
-By default runs ALL remaining batches automatically until the full dataset is
-covered (~246 questions per subject → ~14 batches of 17/subject).
-Stop any time with Ctrl+C — state is saved after each model finishes,
-so it always resumes from where it left off.
-
-Usage:
-  caffeinate -i python3 run_batches_german.py          # run ALL remaining batches (recommended)
-  python3 run_batches_german.py --once                 # run only the next single batch, then stop
-  python3 run_batches_german.py --only gptoss          # run just one model for the current batch
-  python3 run_batches_german.py --status               # show current state, don't run anything
-  python3 run_batches_german.py --next-batch           # force-advance to the next batch offset
-
-Batch size : 1000 questions (~17 per subject × 57 subjects)
-Model order: gptoss → qwen3.5 → gemma4
-State file : batch_state_german.json  (independent of the English batch_state.json)
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -43,7 +20,6 @@ MODEL_SCRIPTS = [
     ("gemma4",  "german_gemma4.py"),
 ]
 
-# ── State helpers ──────────────────────────────────────────────────────────────
 
 def load_state() -> dict:
     """Load state file. Initialises at offset=0 (German starts fresh)."""
@@ -76,7 +52,6 @@ def advance_batch(state: dict) -> dict:
     state["models_done_this_batch"]  = []
     return state
 
-# ── Runner ─────────────────────────────────────────────────────────────────────
 
 def run_model(script_name: str, offset: int, n: int) -> bool:
     """Run one model script via env vars. Returns True on success."""
@@ -125,7 +100,6 @@ def print_status(state: dict) -> None:
                   f"models={h['completed']}  finished={h['finished']}")
     print(f"{'─'*55}\n")
 
-# ── Exhaustion detection ───────────────────────────────────────────────────────
 
 def count_files(model_key: str) -> int:
     """Return the number of existing JSONL files for a model."""
@@ -144,7 +118,6 @@ def count_new_records(model_key: str, files_before: int) -> int:
             total += sum(1 for line in fh if line.strip())
     return total
 
-# ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description="Run German MMLU batches sequentially")

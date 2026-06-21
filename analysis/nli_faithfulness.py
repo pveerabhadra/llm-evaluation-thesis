@@ -1,35 +1,3 @@
-"""
-nli_faithfulness.py
--------------------
-Computes NLI-based faithfulness scores for SciDQA RAG conditions.
-
-For each answered record in rag_top3 / rag_top5 / rag_dense, checks whether
-the model's response is supported by the retrieved chunks using a local NLI
-model (cross-encoder/nli-deberta-v3-base).
-
-No API calls — runs entirely offline on CPU.
-
-How it works:
-  1. Re-computes the exact same chunks used during evaluation (same paper,
-     same BM25 top-k, same Algorithm 1 chunking).
-  2. Splits the model response into sentences.
-  3. For each sentence, runs NLI: premise=chunks, hypothesis=sentence.
-  4. Faithfulness = fraction of sentences labelled ENTAILMENT.
-
-Scores:
-  1.0 → every sentence grounded in the retrieved chunks
-  0.0 → no sentence supported by the chunks (pure hallucination)
-
-Output (with --save):
-  analysis/scidqa_nli_faithfulness.jsonl   — per-record faithfulness scores
-  analysis/scidqa_nli_faithfulness_report.txt
-
-Usage:
-  python3 nli_faithfulness.py                        # score all models + conditions
-  python3 nli_faithfulness.py --condition rag_top3   # one condition only
-  python3 nli_faithfulness.py --model gemma4         # one model only
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -58,7 +26,6 @@ except ImportError:
     raise SystemExit("Missing dependency: pip3 install transformers torch")
 
 
-# ── Paths ──────────────────────────────────────────────────────────────────────
 SCRIPT_DIR  = os.path.dirname(os.path.abspath(__file__))
 THESIS_ROOT = os.path.dirname(SCRIPT_DIR)
 SCIDQA_DIR  = os.path.join(THESIS_ROOT, "SciDQA")
@@ -77,7 +44,6 @@ VERSION_MAP     = {"Initial": "initial", "Revised": "final"}
 SENTENCES_PER_CHUNK = 10
 CHUNK_OVERLAP       = 1
 
-# ── CLI ────────────────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser(description="NLI faithfulness scoring for SciDQA")
 parser.add_argument("--condition", choices=RAG_CONDITIONS, default=None,
                     help="Score one condition only (default: all RAG conditions)")
@@ -96,7 +62,6 @@ MODEL_FILTER = {
 OUTPUT_JSONL  = os.path.join(SCRIPT_DIR, "scidqa_nli_faithfulness.jsonl")
 OUTPUT_REPORT = os.path.join(SCRIPT_DIR, "scidqa_nli_faithfulness_report.txt")
 
-# ── NLI model ─────────────────────────────────────────────────────────────────
 NLI_MODEL = "cross-encoder/nli-deberta-v3-base"
 
 print(f"Loading NLI model: {NLI_MODEL}  (first run downloads ~350 MB)")
@@ -125,7 +90,6 @@ for item in _probe:
 
 print(f"NLI labels detected: {_label_map}")
 
-# ── Chunking (must match evaluation scripts — SciDQA Algorithm 1) ─────────────
 def chunk_text(text: str) -> list[str]:
     chunks: list[str] = []
     stride = max(1, SENTENCES_PER_CHUNK - CHUNK_OVERLAP)
@@ -143,7 +107,6 @@ def chunk_text(text: str) -> list[str]:
                 chunks.append(chunk)
     return chunks
 
-# ── BM25 retrieval ─────────────────────────────────────────────────────────────
 def get_rag_context(question: str, paper_text: str, top_k: int) -> str:
     chunks = chunk_text(paper_text)
     if not chunks:
@@ -155,10 +118,8 @@ def get_rag_context(question: str, paper_text: str, top_k: int) -> str:
     selected  = [chunks[i] for i in sorted(top_idx)]
     return "\n\n".join(selected)
 
-# Top-k per condition
 TOPK = {"rag_top3": 3, "rag_top5": 5, "rag_dense": 3}
 
-# ── NLI faithfulness for one record ───────────────────────────────────────────
 def faithfulness_score(response: str, context: str) -> Optional[float]:
     """
     Returns fraction of response sentences entailed by the context.
@@ -191,7 +152,6 @@ def faithfulness_score(response: str, context: str) -> Optional[float]:
 
     return round(entailed / len(sentences), 4)
 
-# ── Main ───────────────────────────────────────────────────────────────────────
 def main():
     print(f"\nConditions to score : {CONDITIONS_TO_SCORE}")
     print(f"Models to score     : {MODEL_FILTER or 'all'}")
@@ -208,7 +168,6 @@ def main():
     all_results:  list[dict] = []
     model_stats:  dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
 
-    # Load already-scored records if output file exists (for resuming)
     already_scored: set[tuple] = set()
     if os.path.exists(OUTPUT_JSONL):
         with open(OUTPUT_JSONL) as fh:
@@ -296,7 +255,6 @@ def main():
         if write_fh:
             write_fh.close()
 
-    # ── Report ─────────────────────────────────────────────────────────────────
     report_lines: list[str] = []
 
     def p(s: str = "") -> None:

@@ -1,23 +1,3 @@
-"""
-run_batches.py
---------------
-Runs English MMLU evaluations for Gemma-4 (FP8), tracking progress
-so the same questions are never repeated across batches.
-
-By default, runs ALL remaining batches automatically until the full
-dataset is covered. Stop any time with Ctrl+C — state is saved after
-each model finishes, so it always resumes from where it left off.
-
-Usage:
-  caffeinate -i python3 run_batches.py          # run ALL remaining batches (recommended)
-  python3 run_batches.py --once                 # run only the next single batch, then stop
-  python3 run_batches.py --status               # show current state, don't run anything
-  python3 run_batches.py --next-batch           # force-advance to the next batch offset
-
-Batch size: 1000 questions (~17 per subject × 57 subjects)
-Model: gemma4 (RedHatAI/gemma-4-31B-it-FP8-Dynamic)
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -40,7 +20,6 @@ MODEL_SCRIPTS = [
     ("gemma4",  "mmlu_english_gemma4.py"),
 ]
 
-# ── State helpers ──────────────────────────────────────────────────────────────
 
 def load_state() -> dict:
     """Load state file, initialising to offset=20 if it doesn't exist yet."""
@@ -73,7 +52,6 @@ def advance_batch(state: dict) -> dict:
     state["models_done_this_batch"] = []
     return state
 
-# ── Runner ─────────────────────────────────────────────────────────────────────
 
 def run_model(script_name: str, offset: int, n: int) -> bool:
     """Run one model script with the given offset/n via env vars. Returns True on success."""
@@ -124,7 +102,6 @@ def print_status(state: dict) -> None:
                   f"models={h['completed']}  finished={h['finished']}")
     print(f"{'─'*50}\n")
 
-# ── Exhaustion detection ───────────────────────────────────────────────────────
 
 def count_files(model_key: str) -> int:
     """Return the number of existing JSONL files for a model."""
@@ -144,8 +121,6 @@ def count_new_records(model_key: str, files_before: int) -> int:
             total += sum(1 for line in fh if line.strip())
     return total
 
-
-# ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description="Run MMLU batches sequentially")

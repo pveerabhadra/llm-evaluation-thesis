@@ -1,29 +1,3 @@
-"""
-bertscore_eval.py
------------------
-Computes BERTScore for all SciDQA conditions using two backbone models:
-
-  1. roberta-large      — matches the SciDQA paper's evaluation exactly
-  2. allenai/scibert_scivocab_uncased — domain-adapted for scientific text (thesis extension)
-
-For each answered record across all models and conditions, computes:
-  - bertscore_P   (Precision)
-  - bertscore_R   (Recall)
-  - bertscore_F1  (F1 — primary metric, same as paper)
-  - scibert_P / scibert_R / scibert_F1 — SciBERT variants
-
-No API calls — runs entirely offline.
-
-Output (with --save):
-  analysis/scidqa_bertscore.jsonl       — per-record scores (appended)
-  analysis/scidqa_bertscore_report.txt  — summary report
-
-Usage:
-  python3 bertscore_eval.py                          # score all models + conditions
-  python3 bertscore_eval.py --model gemma4           # one model only
-  python3 bertscore_eval.py --condition rag_top3     # one condition only
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -41,11 +15,9 @@ except ImportError:
 
 from transformers import AutoTokenizer as _AutoTokenizer
 
-# Pre-load the SciBERT tokenizer once for truncation
 _scibert_tokenizer = _AutoTokenizer.from_pretrained("allenai/scibert_scivocab_uncased")
 
 
-# ── Paths ──────────────────────────────────────────────────────────────────────
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
 COMBINED_FILES = {
@@ -59,25 +31,15 @@ ALL_CONDITIONS = ["no_retrieval", "rag_top3", "rag_top5", "rag_dense", "long_con
 OUTPUT_JSONL  = os.path.join(SCRIPT_DIR, "scidqa_bertscore.jsonl")
 OUTPUT_REPORT = os.path.join(SCRIPT_DIR, "scidqa_bertscore_report.txt")
 
-# ── Backbone models ─────────────────────────────────────────────────────────────
 ROBERTA  = "roberta-large"            # matches SciDQA paper
 SCIBERT  = "allenai/scibert_scivocab_uncased"  # domain-adapted for scientific text
-
-# ── CLI ────────────────────────────────────────────────────────────────────────
-parser = argparse.ArgumentParser(description="BERTScore evaluation for SciDQA")
-parser.add_argument("--model",     choices=["gemma4","gptoss","qwen3.5"], default=None)
-parser.add_argument("--condition", choices=ALL_CONDITIONS, default=None)
-args = parser.parse_args()
 
 MODEL_LABEL_MAP = {
     "gemma4"  : "gemma-4-31B",
     "gptoss"  : "gpt-oss-120b",
     "qwen3.5" : "Qwen3.5-122B",
 }
-MODEL_FILTER     = MODEL_LABEL_MAP.get(args.model) if args.model else None
-CONDITIONS_TO_DO = [args.condition] if args.condition else ALL_CONDITIONS
 
-# ── Helpers ────────────────────────────────────────────────────────────────────
 def _avg(vals: list) -> float:
     clean = [v for v in vals if v is not None]
     return statistics.mean(clean) if clean else 0.0
@@ -123,9 +85,15 @@ def run_bertscore(predictions: list[str], references: list[str],
     )
 
 
-# ── Main ───────────────────────────────────────────────────────────────────────
 def main():
-    # Load already-scored records so we can resume
+    parser = argparse.ArgumentParser(description="BERTScore evaluation for SciDQA")
+    parser.add_argument("--model",     choices=["gemma4","gptoss","qwen3.5"], default=None)
+    parser.add_argument("--condition", choices=ALL_CONDITIONS, default=None)
+    args = parser.parse_args()
+
+    model_filter     = MODEL_LABEL_MAP.get(args.model) if args.model else None
+    conditions_to_do = [args.condition] if args.condition else ALL_CONDITIONS
+
     already_scored: set[tuple] = set()
     if os.path.exists(OUTPUT_JSONL):
         with open(OUTPUT_JSONL) as fh:
@@ -145,7 +113,7 @@ def main():
 
     try:
         for model_label, fpath in COMBINED_FILES.items():
-            if MODEL_FILTER and model_label != MODEL_FILTER:
+            if model_filter and model_label != model_filter:
                 continue
             if not os.path.exists(fpath):
                 print(f"[{model_label}] File not found: {fpath} — skipping")
@@ -162,7 +130,7 @@ def main():
                     if not line.strip():
                         continue
                     r = json.loads(line)
-                    if r.get("condition") not in CONDITIONS_TO_DO:
+                    if r.get("condition") not in conditions_to_do:
                         continue
                     if r.get("error") or not r.get("response_text") or not r.get("gold_answer"):
                         continue
@@ -180,11 +148,9 @@ def main():
 
                 print(f"\n  Condition: {condition}  ({len(records)} records)")
 
-                # ── RoBERTa (paper baseline) ───────────────────────────────
                 print(f"    Running BERTScore with {ROBERTA}...")
                 rb_P, rb_R, rb_F1 = run_bertscore(predictions, references, ROBERTA, batch_size=32)
 
-                # ── SciBERT (thesis extension) ─────────────────────────────
                 print(f"    Running BERTScore with {SCIBERT}...")
                 sci_P, sci_R, sci_F1 = run_bertscore(predictions, references, SCIBERT, batch_size=16)
 
@@ -220,14 +186,13 @@ def main():
         if write_fh:
             write_fh.close()
 
-    # ── Report ─────────────────────────────────────────────────────────────────
     report_lines: list[str] = []
 
     def p(s: str = "") -> None:
         report_lines.append(s)
         print(s)
 
-    models_shown = [m for m in COMBINED_FILES if not MODEL_FILTER or m == MODEL_FILTER]
+    models_shown = [m for m in COMBINED_FILES if not model_filter or m == model_filter]
 
     p(f"\n{'═'*68}")
     p(f"  BERTScore Report — SciDQA")
@@ -242,7 +207,7 @@ def main():
         p(f"── {metric_label} ──────────────────────────────────")
         p(f"  {'Condition':<15}" + "".join(f" {m[:14]:>14}" for m in models_shown))
         p(f"  {'─'*15}" + "".join(f" {'─'*14}" for _ in models_shown))
-        for cond in CONDITIONS_TO_DO:
+        for cond in conditions_to_do:
             row = f"  {cond:<15}"
             for m in models_shown:
                 vals = stats[m].get(cond, [])
@@ -257,7 +222,7 @@ def main():
     p()
     p(f"  {'Condition':<15}" + "".join(f" {m[:14]:>14}" for m in models_shown))
     p(f"  {'─'*15}" + "".join(f" {'─'*14}" for _ in models_shown))
-    for cond in CONDITIONS_TO_DO:
+    for cond in conditions_to_do:
         row = f"  {cond:<15}"
         for m in models_shown:
             rb  = _avg(rb_stats[m].get(cond,  []))

@@ -1,18 +1,3 @@
-"""
-MMLU English Evaluation — Gemma-4 31B (FP8)
-=============================================
-Evaluates 570 questions across 57 MMLU subjects (English) using a
-structured JSON-output prompt. Tracks accuracy, latency, and per-subject
-performance. Outputs versioned JSONL + summary files.
-
-Usage:
-  python3 mmlu_english_gemma4.py
-
-Environment variables (optional overrides):
-  MMLU_N=570        number of questions
-  MMLU_OFFSET=20    offset into each subject's test split
-"""
-
 from __future__ import annotations
 
 import glob
@@ -28,7 +13,7 @@ from datasets import load_dataset
 from openai import OpenAI
 from tqdm import tqdm
 
-LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL", "https://litellm.uni-osnabrueck.de/v1")
+LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL")
 LITELLM_API_KEY  = os.getenv("LITELLM_API_KEY", "")
 MODEL_NAME       = "RedHatAI/gemma-4-31B-it-FP8-Dynamic"
 

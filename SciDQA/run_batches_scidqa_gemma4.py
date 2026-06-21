@@ -1,28 +1,14 @@
-"""
-Batch runner for SciDQA Gemma-4 evaluation.
-Runs scidqa_gemma4.py in 500-question batches across all 2,937 questions.
-
-Stops immediately if any batch exits with an error.
-Resume: re-run this script — it reads batch_state_gemma4.json and continues
-        from where it left off.
-
-Usage:
-  caffeinate python3 run_batches_scidqa_gemma4.py
-"""
-
 import json
 import os
 import subprocess
 import sys
 import time
 
-# ── Config ─────────────────────────────────────────────────────────────────────
 TOTAL_QUESTIONS = 2937
 BATCH_SIZE      = 500
 SCRIPT          = os.path.join(os.path.dirname(__file__), "scidqa_gemma4.py")
 STATE_FILE      = os.path.join(os.path.dirname(__file__), "batch_state_scidqa_gemma4.json")
 
-# ── State helpers ──────────────────────────────────────────────────────────────
 def load_state() -> dict:
     if os.path.exists(STATE_FILE):
         with open(STATE_FILE) as f:
@@ -33,7 +19,6 @@ def save_state(state: dict):
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
 
-# ── Batch plan ─────────────────────────────────────────────────────────────────
 def build_batches() -> list[tuple[int, int]]:
     """Returns list of (offset, n) pairs."""
     batches = []
@@ -44,7 +29,6 @@ def build_batches() -> list[tuple[int, int]]:
         offset += n
     return batches
 
-# ── Main ───────────────────────────────────────────────────────────────────────
 def main():
     batches = build_batches()
     total_batches = len(batches)

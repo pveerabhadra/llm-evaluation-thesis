@@ -1,29 +1,3 @@
-"""
-cross_language_analysis.py
---------------------------
-Compares MMLU English vs German accuracy per model.
-
-Produces:
-  1. Per-subject EN/DE accuracy drop table (57 subjects × 3 models)
-  2. Per-MMLU-category summary (STEM / Humanities / Social Sciences / Other)
-  3. Overall accuracy summary
-  4. McNemar's test — pairwise model comparisons within English and within German
-  5. Paired t-test   — subject-level accuracy drops across models
-  6. Bootstrap 95% CI on overall accuracy differences
-
-Why McNemar's (not k-fold CV):
-  K-fold cross-validation is for training/model-selection evaluation on ML models
-  you train yourself. It requires re-running experiments across splits. Your models
-  are fixed pre-trained LLMs evaluated on a fixed benchmark — you cannot re-train
-  them. McNemar's test is the standard statistical test for comparing two classifiers
-  on the same binary test items (correct/incorrect per question). It directly answers
-  "did model A make significantly different errors than model B?"
-
-Usage:
-  cd analysis && python3 cross_language_analysis.py
-  cd analysis && python3 cross_language_analysis.py --save
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -37,7 +11,6 @@ from scipy import stats as scipy_stats
 
 THESIS_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-# ── MMLU category map (from openai/MMMLU / standard MMLU taxonomy) ─────────────
 MMLU_CATEGORIES = {
     "STEM": [
         "abstract_algebra", "anatomy", "astronomy", "college_biology",
@@ -75,8 +48,6 @@ def subject_to_category(subject: str) -> str:
             return cat
     return "Other"
 
-
-# ── Data loading ────────────────────────────────────────────────────────────────
 
 MODEL_KEYS = {
     "gptoss":  "gpt-oss-120b",
@@ -121,8 +92,6 @@ def subject_accuracy(records: list[dict]) -> dict[str, dict]:
     return result
 
 
-# ── McNemar's test ──────────────────────────────────────────────────────────────
-
 def mcnemar_test(records_a: list[dict], records_b: list[dict], key_fn) -> dict:
     """
     Perform McNemar's test comparing model A vs model B on the same questions.
@@ -166,8 +135,6 @@ def mcnemar_test(records_a: list[dict], records_b: list[dict], key_fn) -> dict:
     }
 
 
-# ── Bootstrap CI ────────────────────────────────────────────────────────────────
-
 def bootstrap_ci(records: list[dict], n_boot: int = 2000, alpha: float = 0.05) -> dict:
     """95% bootstrap CI on overall accuracy (answered records only)."""
     import random
@@ -187,8 +154,6 @@ def bootstrap_ci(records: list[dict], n_boot: int = 2000, alpha: float = 0.05) -
     return {"mean": obs_mean, "ci_lo": lo, "ci_hi": hi}
 
 
-# ── Paired t-test on subject drops ─────────────────────────────────────────────
-
 def paired_ttest_drops(drops_a: list[float], drops_b: list[float]) -> dict:
     """
     Test whether model A's EN→DE accuracy drop significantly differs from model B's.
@@ -202,8 +167,6 @@ def paired_ttest_drops(drops_a: list[float], drops_b: list[float]) -> dict:
     return {"t": round(t, 3), "p": round(p, 4), "significant": p < 0.05}
 
 
-# ── Printing helpers ────────────────────────────────────────────────────────────
-
 W = 80
 
 def header(title: str) -> None:
@@ -215,8 +178,6 @@ def header(title: str) -> None:
 def subheader(title: str) -> None:
     print(f"\n── {title} {'─' * max(0, W - len(title) - 4)}")
 
-
-# ── Main ────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -245,14 +206,12 @@ def main() -> None:
     MODEL_ORDER = [("gptoss", "gpt-oss-120b"), ("gemma4", "gemma-4-31B"), ("qwen3.5", "Qwen3.5-122B")]
     MODEL_LABELS = [label for _, label in MODEL_ORDER]
 
-    # ── Load all data ──────────────────────────────────────────────────────────
     en_records: dict[str, list[dict]] = {}
     de_records: dict[str, list[dict]] = {}
     for key, label in MODEL_ORDER:
         en_records[key] = load_combined("en", key)
         de_records[key] = load_combined("de", key)
 
-    # ── Per-subject accuracy ───────────────────────────────────────────────────
     en_acc: dict[str, dict[str, dict]] = {k: subject_accuracy(en_records[k]) for k, _ in MODEL_ORDER}
     de_acc: dict[str, dict[str, dict]] = {k: subject_accuracy(de_records[k]) for k, _ in MODEL_ORDER}
 
@@ -293,7 +252,6 @@ def main() -> None:
         if s not in subj_cat:
             subj_cat[s] = subject_to_category(s)
 
-    # ── TABLE 1: Per-subject EN/DE/drop ────────────────────────────────────────
     header("MMLU Cross-Language Analysis — English vs German Accuracy")
 
     col_w = 44
@@ -341,7 +299,6 @@ def main() -> None:
     print(f"\n  Legend: EN = English accuracy, DE = German accuracy, Δ = EN − DE (positive = drop)")
     print(f"  Columns: " + " | ".join(f"{label}" for _, label in MODEL_ORDER))
 
-    # ── TABLE 2: Per-category summary ─────────────────────────────────────────
     header("Per-MMLU-Category Summary")
     cat_header = f"  {'Category':<22}" + "".join(f"  {'EN':>6} {'DE':>6} {'Δ':>6}  {'N':>3}" for _ in MODEL_ORDER)
     print(cat_header)
@@ -361,7 +318,6 @@ def main() -> None:
             row += f"  {en_mean:6.1f}% {de_mean:6.1f}% {drop:+6.1f}%  {len(en_vals):3d}"
         print(row)
 
-    # ── TABLE 3: Overall accuracy summary ─────────────────────────────────────
     header("Overall Accuracy Summary")
     print(f"\n  {'Metric':<35}" + "".join(f"  {label:>14}" for _, label in MODEL_ORDER))
     print(f"  {'─'*35}" + "".join(f"  {'─'*14}" for _ in MODEL_ORDER))
@@ -399,7 +355,6 @@ def main() -> None:
     _row("Avg subject-level drop",
          [f"{avg_subj_drop[k]*100:+.2f}%" for k, _ in MODEL_ORDER])
 
-    # ── McNemar's Test ─────────────────────────────────────────────────────────
     header("Statistical Significance — McNemar's Test (pairwise model comparisons)")
 
     print("""
@@ -435,7 +390,6 @@ def main() -> None:
                   f"  χ²={res['chi2']}  p={res['p_value']}  → {sig}{direction}")
         print()
 
-    # ── Paired t-test on subject drops ────────────────────────────────────────
     header("Paired t-test — Subject-Level Accuracy Drops (EN − DE)")
     print("""
   Tests whether one model's EN→DE drop significantly differs from another's.
@@ -457,7 +411,6 @@ def main() -> None:
             print(f"    Insufficient data.")
         print()
 
-    # ── Largest drops ──────────────────────────────────────────────────────────
     header("Top-10 Subjects with Largest Average EN→DE Accuracy Drop")
     avg_drops = {}
     for subj in all_subjects:

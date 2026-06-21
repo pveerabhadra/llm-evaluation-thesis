@@ -1,18 +1,3 @@
-"""
-combine_results.py
-------------------
-Merges all MMLU result batches for each model, checks for duplicate questions,
-and prints a combined accuracy report ready for thesis use.
-
-Run this after every batch to verify data integrity.
-Run at the end to get your final thesis numbers.
-
-Usage:
-  python3 combine_results.py                  # English MMLU (default)
-  python3 combine_results.py --lang de        # German MMLU (once those files exist)
-  python3 combine_results.py --lang en --save # also write combined .jsonl + report to disk
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -44,7 +29,6 @@ FILE_PATTERNS = {
     },
 }
 
-# ── Loaders ────────────────────────────────────────────────────────────────────
 
 def load_model_files(pattern: str, result_dir: str) -> tuple[list[dict], list[str]]:
     """Load all matching JSONL files for one model. Returns (records, filenames_used)."""
@@ -60,8 +44,6 @@ def load_model_files(pattern: str, result_dir: str) -> tuple[list[dict], list[st
                     records.append(json.loads(line))
     return records, [os.path.basename(f) for f in files]
 
-
-# ── Duplicate detection & deduplication ────────────────────────────────────────
 
 def find_duplicates(records: list[dict]) -> list[str]:
     """Return list of question texts that appear more than once (before dedup)."""
@@ -82,8 +64,6 @@ def deduplicate(records: list[dict]) -> tuple[list[dict], int]:
     deduped = list(seen.values())
     return deduped, len(records) - len(deduped)
 
-
-# ── Analysis ───────────────────────────────────────────────────────────────────
 
 def analyse_model(records: list[dict], model_label: str) -> dict:
     """Compute all stats for one model's combined records."""
@@ -128,8 +108,6 @@ def analyse_model(records: list[dict], model_label: str) -> dict:
         "n_subjects"   : len(subject_total),
     }
 
-
-# ── Printing ───────────────────────────────────────────────────────────────────
 
 def print_model_report(stats: dict, files_used: list[str], duplicates: list[str]) -> None:
     w = 65
@@ -244,8 +222,6 @@ def print_comparison_table(all_stats: list[dict]) -> None:
     print(f"  {'AVG COMPLETION TOKENS':40}" + "".join(f"  {s['avg_completion_tokens']:>12.0f}" for s in all_stats))
 
 
-# ── Save ───────────────────────────────────────────────────────────────────────
-
 def save_combined(records: list[dict], model_key: str, lang: str, result_dir: str) -> str:
     """Write all records for one model to a single combined JSONL file."""
     fname = os.path.join(result_dir, f"mmlu_{lang}_{model_key}_combined.jsonl")
@@ -263,8 +239,6 @@ def save_report(report_lines: list[str], lang: str) -> str:
         f.write("\n".join(report_lines) + "\n")
     return fname
 
-
-# ── Main ───────────────────────────────────────────────────────────────────────
 
 class _Tee:
     """Write to both stdout and a buffer simultaneously."""

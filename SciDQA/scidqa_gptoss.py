@@ -1,20 +1,3 @@
-"""
-SciDQA Full Evaluation — GPT-OSS 120B
-=======================================
-Evaluates questions under five conditions:
-  1. no_retrieval  – closed-book (model's parametric knowledge)
-  2. rag_top3      – top-3 BM25 chunks (replicates SciDQA paper baseline)
-  3. rag_top5      – top-5 BM25 chunks (extended baseline)
-  4. rag_dense     – top-3 chunks via dense semantic retrieval (thesis extension)
-  5. long_context  – full paper text (up to 140 000 chars)
-
-Usage:
-  python3 scidqa_gptoss.py                     # questions 0-499
-  python3 scidqa_gptoss.py --offset 500 --n 500  # questions 500-999
-
-Exits with code 1 immediately on any critical API error (401, 404).
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -55,14 +38,12 @@ except ImportError:
     sys.exit("Missing dependency: pip3 install sentence-transformers")
 
 
-# ── Credentials ────────────────────────────────────────────────────────────────
-LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL", "https://litellm.uni-osnabrueck.de/v1")
+LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL")
 LITELLM_API_KEY  = os.getenv("LITELLM_API_KEY", "")
 MODEL_NAME       = "openai/gpt-oss-120b"
 
 client = OpenAI(base_url=LITELLM_BASE_URL, api_key=LITELLM_API_KEY)
 
-# ── Config ─────────────────────────────────────────────────────────────────────
 MAX_WORKERS        = 40
 RATE_LIMIT         = 200         # requests per minute
 CONTEXT_CHARS      = 140_000     # long_context: max paper chars sent (~35 k tokens)
@@ -76,7 +57,6 @@ SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR   = os.path.join(SCRIPT_DIR, "data")
 VERSION_MAP = {"Initial": "initial", "Revised": "final"}
 
-# ── CLI args ───────────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser()
 parser.add_argument("--offset", type=int, default=0,   help="Row offset into dataset")
 parser.add_argument("--n",      type=int, default=500, help="Number of questions to process")
@@ -100,7 +80,6 @@ _RUN_NAME    = _next_version(_BASE)
 OUTPUT_FILE  = os.path.join(SCRIPT_DIR, f"{_RUN_NAME}.jsonl")
 SUMMARY_FILE = os.path.join(SCRIPT_DIR, f"{_RUN_NAME}_summary.txt")
 
-# ── System prompts ─────────────────────────────────────────────────────────────
 SYSTEM_NO_RETRIEVAL = (
     "You are a knowledgeable research assistant. "
     "Answer the question accurately based on your knowledge of scientific literature. "
@@ -141,7 +120,6 @@ def build_prompt_long_context(question: str, paper_text: str) -> str:
         f"Question: {question}"
     )
 
-# ── Chunking (SciDQA paper Algorithm 1) ───────────────────────────────────────
 def chunk_text(text: str,
                sentences_per_chunk: int = SENTENCES_PER_CHUNK,
                overlap: int = CHUNK_OVERLAP) -> list[str]:
@@ -161,7 +139,6 @@ def chunk_text(text: str,
                 chunks.append(chunk)
     return chunks
 
-# ── BM25 retrieval ─────────────────────────────────────────────────────────────
 def retrieve_chunks(question: str, paper_text: str, top_k: int = 3) -> tuple[list[str], list[int]]:
     chunks = chunk_text(paper_text)
     if not chunks:
@@ -173,7 +150,6 @@ def retrieve_chunks(question: str, paper_text: str, top_k: int = 3) -> tuple[lis
     top_idx_ordered = sorted(top_idx)
     return [chunks[i] for i in top_idx_ordered], top_idx_ordered
 
-# ── Dense retrieval ────────────────────────────────────────────────────────────
 _embed_model: Optional[SentenceTransformer] = None
 _embed_lock = threading.Lock()
 
@@ -196,7 +172,6 @@ def retrieve_chunks_dense(question: str, paper_text: str, top_k: int = 3) -> tup
     top_idx_ordered = sorted(top_idx)
     return [chunks[i] for i in top_idx_ordered], top_idx_ordered
 
-# ── ROUGE ──────────────────────────────────────────────────────────────────────
 _rouge = _rouge_scorer_module.RougeScorer(["rouge1", "rouge2", "rougeL"], use_stemmer=True)
 
 def compute_rouge(prediction: str, reference: str) -> dict:
@@ -213,7 +188,6 @@ def compute_rouge(prediction: str, reference: str) -> dict:
         "rouge_avg": round((r1 + r2 + rl) / 3, 4),
     }
 
-# ── N-gram grounding score ─────────────────────────────────────────────────────
 def ngram_grounding_score(response: str, source: str, n: int = 4) -> Optional[float]:
     if not response or not source:
         return None
@@ -226,7 +200,6 @@ def ngram_grounding_score(response: str, source: str, n: int = 4) -> Optional[fl
     src_ng = get_ngrams(source)
     return round(len(resp_ng & src_ng) / len(resp_ng), 4)
 
-# ── No-answer detection ────────────────────────────────────────────────────────
 _NO_ANSWER_PHRASES = [
     "i don't know", "i do not know", "i'm not sure", "i am not sure",
     "cannot answer", "can't answer", "unable to answer",
@@ -242,7 +215,6 @@ def detect_no_answer(text: str) -> bool:
     tl = text.lower()
     return any(p in tl for p in _NO_ANSWER_PHRASES)
 
-# ── Rate limiter ───────────────────────────────────────────────────────────────
 class RateLimiter:
     def __init__(self, max_per_minute: int):
         self._interval  = 60.0 / max_per_minute
@@ -260,7 +232,6 @@ class RateLimiter:
 rate_limiter = RateLimiter(RATE_LIMIT)
 write_lock   = threading.Lock()
 
-# ── API call ───────────────────────────────────────────────────────────────────
 def call_model(system_prompt: str, user_prompt: str, retries: int = 3) -> dict:
     for attempt in range(retries):
         rate_limiter.acquire()
@@ -312,7 +283,6 @@ def call_model(system_prompt: str, user_prompt: str, retries: int = 3) -> dict:
 
     return {"text": None, "reasoning": None, "latency": 0, "tokens": {}, "error": "unknown"}
 
-# ── Worker ─────────────────────────────────────────────────────────────────────
 def evaluate_question(args: tuple) -> list[dict]:
     i, row, paper_text = args
     records: list[dict] = []
@@ -409,7 +379,6 @@ def evaluate_question(args: tuple) -> list[dict]:
 
     return records
 
-# ── Data loading ───────────────────────────────────────────────────────────────
 def load_data(offset: int, n: int) -> list[tuple]:
     df = pd.read_excel(os.path.join(DATA_DIR, "SciDQADataset.xlsx"))
     df = df.iloc[offset : offset + n].reset_index(drop=True)
@@ -431,7 +400,6 @@ def load_data(offset: int, n: int) -> list[tuple]:
         print(f"  Warning: {missing}/{len(items)} questions have no paper text")
     return items
 
-# ── Summary ────────────────────────────────────────────────────────────────────
 def _avg(vals: list) -> float:
     clean = [v for v in vals if v is not None]
     return sum(clean) / len(clean) if clean else 0.0
@@ -519,7 +487,6 @@ def build_summary(all_records: list[dict]) -> str:
     lines += [f"Output : {OUTPUT_FILE}", f"Summary: {SUMMARY_FILE}"]
     return "\n".join(lines)
 
-# ── Main ───────────────────────────────────────────────────────────────────────
 def run_evaluation():
     print("=" * 68)
     print("SciDQA Evaluation  —  GPT-OSS 120B")

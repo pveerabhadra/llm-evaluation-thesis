@@ -1,29 +1,3 @@
-"""
-thesis_tables.py
-----------------
-Generates all thesis-ready tables from combined evaluation data.
-
-Tables produced:
-  Table 1 — SciDQA main results: ROUGE × BERTScore × NLI × (LLM-judge where available)
-  Table 2 — SciDQA RAG delta over no_retrieval
-  Table 3 — SciDQA mismatch / hallucination analysis
-  Table 4 — MMLU English + German accuracy summary
-  Table 5 — Efficiency (latency + tokens per model × task)
-
-Sources used:
-  analysis/scidqa_{model}_combined.jsonl   — ROUGE, grounding, no-answer, latency
-  analysis/scidqa_bertscore.jsonl          — BERTScore F1 (RoBERTa + SciBERT)
-  analysis/scidqa_nli_faithfulness.jsonl   — NLI faithfulness (RAG conditions)
-  analysis/scidqa_llm_judge.jsonl          — ALS score (Gemma-4 only; partial)
-  SciDQA/scidqa_mismatch_*_summary.txt     — mismatch/hallucination summaries
-  MMLU/mmlu_en_*_combined.jsonl            — English MMLU
-  MMLU German/mmlu_de_*_combined.jsonl     — German MMLU
-
-Usage:
-  cd analysis && python3 thesis_tables.py
-  cd analysis && python3 thesis_tables.py --save
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -62,8 +36,6 @@ RAG_CONDITIONS = ["rag_top3", "rag_top5", "rag_dense"]
 W = 88
 
 
-# ── Loaders ─────────────────────────────────────────────────────────────────────
-
 def load_jsonl(path: str) -> list[dict]:
     if not os.path.exists(path):
         print(f"  [WARN] Missing: {path}", file=sys.stderr)
@@ -81,8 +53,6 @@ def load_mmlu_combined(lang: str, model_key: str) -> list[dict]:
             "de": os.path.join(THESIS_ROOT, "MMLU German")}
     return load_jsonl(os.path.join(dirs[lang], f"mmlu_{lang}_{model_key}_combined.jsonl"))
 
-
-# ── Aggregators ──────────────────────────────────────────────────────────────────
 
 def scidqa_rouge_stats(records: list[dict]) -> dict[str, dict]:
     """Per-condition ROUGE and related stats. Excludes error records."""
@@ -177,7 +147,8 @@ def nli_stats(records: list[dict]) -> dict[str, dict[str, dict]]:
 def als_stats(records: list[dict]) -> dict[str, dict[str, dict]]:
     """
     ALS = Average LLM Score.
-    Currently only Gemma-4 answers were judged. Returns {answer_model: {condition: als}}.
+    All three models judged cross-reference (each model judged by the other two).
+    Returns {answer_model: {condition: als}}.
     ALS is mean of dimension scores (1–10 scale), averaged across judges.
     """
     data: dict[str, dict[str, list]] = {k: {c: [] for c in CONDITIONS} for k in MODEL_KEYS}
@@ -221,45 +192,64 @@ def mmlu_subject_accuracy(records: list[dict]) -> dict[str, float]:
     }
 
 
-# ── Mismatch summary parser ──────────────────────────────────────────────────────
-
-def parse_mismatch_summary(model_key: str) -> dict:
+def parse_mismatch_jsonl(model_key: str) -> dict:
     """
-    Reads scidqa_mismatch_{model}_*_summary.txt and extracts key stats.
-    Returns dict with source attribution counts and ROUGE.
+    Reads scidqa_mismatch_{model}_offset0_n2937.jsonl directly.
+    Uses only records without errors for percentage / ROUGE calculations.
+    Returns dict with source attribution percentages and ROUGE.
     """
-    import glob as _glob
-    pattern = os.path.join(THESIS_ROOT, "SciDQA",
-                           f"scidqa_mismatch_{model_key}_*summary.txt")
-    files = _glob.glob(pattern)
-    if not files:
+    path = os.path.join(THESIS_ROOT, "SciDQA",
+                        f"scidqa_mismatch_{model_key}_offset0_n2937.jsonl")
+    if not os.path.exists(path):
+        print(f"  [WARN] Missing mismatch JSONL: {path}", file=sys.stderr)
         return {}
-    with open(files[0]) as f:
-        text = f.read()
 
-    def extract(label: str) -> float | None:
-        m = re.search(rf"{re.escape(label)}\s*[:\s]+([0-9.]+)", text)
-        return float(m.group(1)) if m else None
+    recs = load_jsonl(path)
+    # error field is stored as string "None" when absent
+    valid = [r for r in recs
+             if not r.get("error") or str(r.get("error")).lower() == "none"]
 
-    def extract_count(label: str) -> int | None:
-        m = re.search(rf"{re.escape(label)}\s*:\s*(\d+)", text)
-        return int(m.group(1)) if m else None
+    if not valid:
+        return {}
 
-    def extract_pct(label: str) -> float | None:
-        m = re.search(rf"{re.escape(label)}\s*:\s*\d+\s+\(([0-9.]+)%\)", text)
-        return float(m.group(1)) if m else None
+    def str_bool(v) -> bool:
+        return str(v).strip().lower() not in ("false", "0", "none", "")
 
+    def safe_float(v) -> float | None:
+        try:
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    attr_counts: dict[str, int] = {"EXCERPT": 0, "TRAINING MEMORY": 0,
+                                    "NOT FOUND": 0, "OTHER": 0}
+    no_ans_count = 0
+    rouge_vals: list[float] = []
+
+    for r in valid:
+        attr = str(r.get("source_attribution", "")).strip().upper()
+        if attr in attr_counts:
+            attr_counts[attr] += 1
+        else:
+            attr_counts["OTHER"] += 1
+
+        if str_bool(r.get("no_answer_signal")):
+            no_ans_count += 1
+
+        rv = safe_float(r.get("rouge_avg"))
+        if rv is not None:
+            rouge_vals.append(rv)
+
+    n = len(valid)
     return {
-        "total":             extract_count("Total records"),
-        "no_answer_pct":     extract_pct("No-answer"),
-        "excerpt_pct":       extract_pct("EXCERPT"),
-        "training_mem_pct":  extract_pct("TRAINING MEMORY"),
-        "not_found_pct":     extract_pct("NOT FOUND"),
-        "rouge_avg":         extract("Avg ROUGE-avg"),
+        "total":            n,
+        "no_answer_pct":    100 * no_ans_count / n if n else None,
+        "excerpt_pct":      100 * attr_counts["EXCERPT"] / n if n else None,
+        "training_mem_pct": 100 * attr_counts["TRAINING MEMORY"] / n if n else None,
+        "not_found_pct":    100 * attr_counts["NOT FOUND"] / n if n else None,
+        "rouge_avg":        statistics.mean(rouge_vals) if rouge_vals else None,
     }
 
-
-# ── Formatting helpers ───────────────────────────────────────────────────────────
 
 def pct(v: float | None, decimals: int = 1) -> str:
     return f"{v:.{decimals}f}" if v is not None else " N/A"
@@ -274,8 +264,6 @@ def header(title: str) -> None:
 def hline(widths: list[int]) -> str:
     return "  " + "  ".join("─" * w for w in widths)
 
-
-# ── Main ─────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
     parser = argparse.ArgumentParser()
@@ -300,7 +288,6 @@ def main() -> None:
     if args.save:
         sys.stdout = tee
 
-    # ── Load all data ──────────────────────────────────────────────────────────
     print("  Loading data...", file=sys.stderr)
 
     scidqa_raw = {mk: load_scidqa_combined(mk) for mk in MODEL_KEYS}
@@ -312,16 +299,14 @@ def main() -> None:
     bs_by_model    = bertscore_stats(bs_records)
     nli_by_model   = nli_stats(nli_records)
     als_by_model   = als_stats(lj_records)
-    mismatch_by_model = {mk: parse_mismatch_summary(mk) for mk in MODEL_KEYS}
+    mismatch_by_model = {mk: parse_mismatch_jsonl(mk) for mk in MODEL_KEYS}
 
     mmlu_en = {mk: mmlu_subject_accuracy(load_mmlu_combined("en", mk)) for mk in MODEL_KEYS}
     mmlu_de = {mk: mmlu_subject_accuracy(load_mmlu_combined("de", mk)) for mk in MODEL_KEYS}
 
     print("  Generating tables...\n", file=sys.stderr)
 
-    # ════════════════════════════════════════════════════════════════════════════
     # TABLE 1 — SciDQA Main Results
-    # ════════════════════════════════════════════════════════════════════════════
     header("TABLE 1 — SciDQA Main Results (2,937 questions × 5 conditions)")
     print("""
   Metrics:
@@ -329,7 +314,7 @@ def main() -> None:
     BS-R    = BERTScore F1 (RoBERTa-large; paper-comparable)
     BS-Sci  = BERTScore F1 (SciBERT; domain-adapted)
     NLI     = NLI faithfulness (RAG/long-context conditions only)
-    ALS     = Average LLM Score 0–100 (Gemma-4 judged by GPT-OSS + Qwen; others N/A)
+    ALS     = Average LLM Score 0–100 (cross-reference: each model judged by the other two)
     No-Ans% = fraction of responses triggering no-answer phrases
 """)
 
@@ -365,12 +350,9 @@ def main() -> None:
         print(row)
 
     print(f"\n  Note: NLI faithfulness only applies to RAG conditions (context grounding check).")
-    print(f"  Note: ALS currently available for Gemma-4 only (GPT-OSS and Qwen judging complete).")
-    print(f"        To complete ALS for all models, run: python3 analysis/llm_judge.py")
+    print(f"  Note: ALS is cross-reference judging — each model's answers scored by the other two.")
 
-    # ════════════════════════════════════════════════════════════════════════════
     # TABLE 1b — Granular ROUGE breakdown
-    # ════════════════════════════════════════════════════════════════════════════
     header("TABLE 1b — SciDQA ROUGE Breakdown (R-1 / R-2 / R-L / R-avg)")
     col_c = 14
     hdr = f"  {'Condition':<{col_c}}"
@@ -393,9 +375,7 @@ def main() -> None:
                     f" {r.get('rouge_avg', 0):.4f}")
         print(row)
 
-    # ════════════════════════════════════════════════════════════════════════════
     # TABLE 2 — RAG Delta over No-Retrieval
-    # ════════════════════════════════════════════════════════════════════════════
     header("TABLE 2 — SciDQA RAG Benefit: Delta over No-Retrieval Baseline")
     print("""
   Shows improvement each retrieval condition provides over no_retrieval.
@@ -427,9 +407,7 @@ def main() -> None:
             row += f"  {delta_r:+6.3f} {delta_bs:+6.3f} {nli_str:>6}"
         print(row)
 
-    # ════════════════════════════════════════════════════════════════════════════
     # TABLE 3 — Mismatch / Hallucination Analysis
-    # ════════════════════════════════════════════════════════════════════════════
     header("TABLE 3 — SciDQA Mismatch Condition (Wrong-Paper RAG)")
     print("""
   Model is given BM25 top-3 chunks from a DIFFERENT paper than the question requires.
@@ -467,7 +445,6 @@ def main() -> None:
                 row += f"  {v:>13.1f}%"
         print(row)
 
-    # Compare mismatch ROUGE vs rag_top3 ROUGE
     print(f"\n  ── ROUGE comparison: mismatch vs rag_top3 (correct paper) ──")
     print(f"  {'Metric':<{col_m2}}" + "".join(f"  {MODEL_NAMES[mk]:>14}" for mk in MODEL_KEYS))
     for label, source, cond in [
@@ -499,9 +476,7 @@ def main() -> None:
     HIGH NOT FOUND % → faithful behaviour (ideal for RAG trustworthiness)
     HIGH EXCERPT %   → risk of context-based hallucination""")
 
-    # ════════════════════════════════════════════════════════════════════════════
     # TABLE 4 — MMLU Summary
-    # ════════════════════════════════════════════════════════════════════════════
     header("TABLE 4 — MMLU Accuracy Summary (English and German)")
     print(f"""
   All 57 MMLU subjects, ~14k questions per model per language.
@@ -532,16 +507,13 @@ def main() -> None:
             row += f"  {src[mk]['total']:>14,}"
         print(row)
 
-    # ════════════════════════════════════════════════════════════════════════════
     # TABLE 5 — Efficiency
-    # ════════════════════════════════════════════════════════════════════════════
     header("TABLE 5 — Efficiency: Average Latency and Token Usage")
     print(f"""
   Latency = wall-clock time per question (seconds).
   Tokens  = completion tokens per question (includes thinking tokens for GPT-OSS/Qwen).
 """)
 
-    # SciDQA efficiency
     print(f"  ── SciDQA ──")
     col_t = 16
     print(f"  {'Condition':<14}" + "".join(f"  {MODEL_NAMES[mk]:>22}" for mk in MODEL_KEYS))
@@ -560,7 +532,6 @@ def main() -> None:
     print(f"  Long Context prompt tokens are large (~26k–28k) due to full paper text;"
           f" these are not shown above.")
 
-    # MMLU efficiency
     print(f"\n  ── MMLU ──")
     print(f"  {'Task':<20}" + "".join(f"  {MODEL_NAMES[mk]:>22}" for mk in MODEL_KEYS))
     print(f"  {'':<20}" + "".join(f"  {'Latency':>8} {'Tokens':>8}" for _ in MODEL_KEYS))

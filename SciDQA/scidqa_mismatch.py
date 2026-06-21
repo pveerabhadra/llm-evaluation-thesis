@@ -1,32 +1,3 @@
-"""
-SciDQA Mismatch Evaluation — Hallucination / Context-Faithfulness Test
-=======================================================================
-Tests whether models actually use the retrieved context or answer from
-training memory (parametric knowledge).
-
-Condition: rag_mismatch
-  For each question about paper X, top-3 BM25 chunks from a RANDOMLY
-  SELECTED DIFFERENT paper Y (Y ≠ X) are provided as context.
-
-Expected outcomes:
-  - ROUGE drops vs rag_top3  →  model was using the context (RAG works)
-  - ROUGE stays similar      →  model is ignoring context, answering from memory
-  - No-answer rate rises     →  model faithfully says "not in these excerpts"
-
-Extra fields saved per record:
-  mismatch_pid    – which wrong paper's chunks were used
-  mismatch_venue  – venue of the wrong paper
-  mismatch_year   – year of the wrong paper
-
-The wrong paper is chosen deterministically per question using
-random.seed(question_id) so results are fully reproducible.
-
-Usage:
-  python3 scidqa_mismatch.py --model gemma4          # default 500 questions
-  python3 scidqa_mismatch.py --model gptoss --n 300
-  python3 scidqa_mismatch.py --model qwen3.5 --offset 500 --n 500
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -62,18 +33,15 @@ except ImportError:
     sys.exit("Missing dependency: pip3 install rank-bm25")
 
 
-# ── Credentials ────────────────────────────────────────────────────────────────
-LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL", "https://litellm.uni-osnabrueck.de/v1")
-LITELLM_API_KEY  = os.getenv("LITELLM_API_KEY",  "sk-12_MUp73XhwdRhvdxJZy3w")
+LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL")
+LITELLM_API_KEY  = os.getenv("LITELLM_API_KEY")
 
-# ── Model registry ─────────────────────────────────────────────────────────────
 MODEL_REGISTRY = {
     "gemma4"  : {"name": "RedHatAI/gemma-4-31B-it-FP8-Dynamic",  "rate": 300, "workers": 40, "max_tokens": 8192},
     "gptoss"  : {"name": "openai/gpt-oss-120b",                   "rate": 200, "workers": 30, "max_tokens": 8192},
     "qwen3.5" : {"name": "Qwen/Qwen3.5-122B-A10B-FP8",           "rate": 200, "workers": 20, "max_tokens": 16384},
 }
 
-# ── CLI args ───────────────────────────────────────────────────────────────────
 parser = argparse.ArgumentParser(description="SciDQA mismatch (hallucination) evaluation")
 parser.add_argument("--model",  required=True, choices=list(MODEL_REGISTRY),
                     help="Which model to evaluate (gemma4 | gptoss | qwen3.5)")
@@ -90,7 +58,6 @@ MAX_TOKENS  = MODEL_CFG["max_tokens"]
 OFFSET      = args.offset
 N_QUESTIONS = args.n
 
-# ── Config ─────────────────────────────────────────────────────────────────────
 CONTEXT_CHARS       = 140_000
 SENTENCES_PER_CHUNK = 10
 CHUNK_OVERLAP       = 1
@@ -107,7 +74,6 @@ SUMMARY_FILE = os.path.join(SCRIPT_DIR,
 
 client = OpenAI(base_url=LITELLM_BASE_URL, api_key=LITELLM_API_KEY)
 
-# ── System prompt & prompt builder ─────────────────────────────────────────────
 SYSTEM_RAG = (
     "You are a research assistant. "
     "You are given excerpts retrieved from a research paper. "
@@ -153,7 +119,6 @@ def parse_source_attribution(response_text: str) -> str:
                 return "NOT FOUND"
     return "UNKNOWN"
 
-# ── Chunking (SciDQA paper Algorithm 1) ───────────────────────────────────────
 def chunk_text(text: str,
                sentences_per_chunk: int = SENTENCES_PER_CHUNK,
                overlap: int = CHUNK_OVERLAP) -> list[str]:
@@ -173,7 +138,6 @@ def chunk_text(text: str,
                 chunks.append(chunk)
     return chunks
 
-# ── BM25 retrieval ─────────────────────────────────────────────────────────────
 def retrieve_chunks(question: str, paper_text: str, top_k: int = TOP_K) -> list[str]:
     chunks = chunk_text(paper_text)
     if not chunks:
@@ -184,7 +148,6 @@ def retrieve_chunks(question: str, paper_text: str, top_k: int = TOP_K) -> list[
     top_idx   = sorted(range(len(scores)), key=lambda i: -scores[i])[:top_k]
     return [chunks[i] for i in sorted(top_idx)]
 
-# ── ROUGE ──────────────────────────────────────────────────────────────────────
 _rouge = _rouge_scorer_module.RougeScorer(["rouge1", "rouge2", "rougeL"], use_stemmer=True)
 
 def compute_rouge(prediction: str, reference: str) -> dict:
@@ -201,7 +164,6 @@ def compute_rouge(prediction: str, reference: str) -> dict:
         "rouge_avg": round((r1 + r2 + rl) / 3, 4),
     }
 
-# ── N-gram grounding score ─────────────────────────────────────────────────────
 def ngram_grounding_score(response: str, source: str, n: int = 4) -> Optional[float]:
     if not response or not source:
         return None
@@ -214,7 +176,6 @@ def ngram_grounding_score(response: str, source: str, n: int = 4) -> Optional[fl
     src_ng = get_ngrams(source)
     return round(len(resp_ng & src_ng) / len(resp_ng), 4)
 
-# ── No-answer detection ────────────────────────────────────────────────────────
 _NO_ANSWER_PHRASES = [
     "i don't know", "i do not know", "i'm not sure", "i am not sure",
     "cannot answer", "can't answer", "unable to answer",
@@ -229,7 +190,6 @@ def detect_no_answer(text: str) -> bool:
         return True
     return any(p in text.lower() for p in _NO_ANSWER_PHRASES)
 
-# ── Rate limiter ───────────────────────────────────────────────────────────────
 class RateLimiter:
     def __init__(self, max_per_minute: int):
         self._interval  = 60.0 / max_per_minute
@@ -246,7 +206,6 @@ class RateLimiter:
 rate_limiter = RateLimiter(RATE_LIMIT)
 write_lock   = threading.Lock()
 
-# ── API call ───────────────────────────────────────────────────────────────────
 def call_model(system_prompt: str, user_prompt: str, retries: int = 3) -> dict:
     for attempt in range(retries):
         rate_limiter.acquire()
@@ -299,7 +258,6 @@ def call_model(system_prompt: str, user_prompt: str, retries: int = 3) -> dict:
 
     return {"text": None, "reasoning": None, "latency": 0, "tokens": {}, "error": "unknown"}
 
-# ── Wrong-paper selector ───────────────────────────────────────────────────────
 def pick_wrong_paper(correct_pid: str,
                      all_pids: list[str],
                      fulltext: dict,
@@ -322,7 +280,6 @@ def pick_wrong_paper(correct_pid: str,
             return pid, text
     return "", ""
 
-# ── Worker ─────────────────────────────────────────────────────────────────────
 def evaluate_question(task: tuple) -> Optional[dict]:
     qid, row, correct_text, wrong_pid, wrong_text, pid_meta = task
 
@@ -393,7 +350,6 @@ def evaluate_question(task: tuple) -> Optional[dict]:
             fh.write(json.dumps(record) + "\n")
     return record
 
-# ── Data loading ───────────────────────────────────────────────────────────────
 def load_data() -> tuple[list[tuple], dict]:
     df = pd.read_excel(os.path.join(DATA_DIR, "SciDQADataset.xlsx"))
     df_slice = df.iloc[OFFSET : OFFSET + N_QUESTIONS].reset_index(drop=True)
@@ -459,7 +415,6 @@ def load_data() -> tuple[list[tuple], dict]:
 
     return tasks, pid_meta
 
-# ── Summary ────────────────────────────────────────────────────────────────────
 def _avg(vals: list) -> float:
     clean = [v for v in vals if v is not None]
     return sum(clean) / len(clean) if clean else 0.0
@@ -524,7 +479,6 @@ def build_summary(records: list[dict]) -> str:
     ]
     return "\n".join(lines)
 
-# ── Main ───────────────────────────────────────────────────────────────────────
 def main():
     print("=" * 68)
     print("SciDQA Mismatch Evaluation — Hallucination Test")

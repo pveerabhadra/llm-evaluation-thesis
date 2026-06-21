@@ -25,6 +25,18 @@ analysis/*_report.txt
 analysis/scidqa_llm_judge_*.txt
 analysis/scidqa_llm_judge_self_*.txt
 
+# Local-only scripts (development/debugging, not part of the methodology)
+SciDQA/scidqa_pilot_gptoss.py
+SciDQA/browse_scidqa.py
+SciDQA/retry_errors_gemma4.py
+SciDQA/retry_bad_qwen_v1v4.py
+SciDQA/retry_qwen_longcontext.py
+MMLU/browse_errors.py
+MMLU/browse_results.py
+MMLU/checking errors.py
+MMLU/deep_eval.py
+MMLU German/pilot_mmlu_german_gemma4.py
+
 # Cursor IDE internals
 .cursor/
 

@@ -1,13 +1,3 @@
-"""
-MMLU English Evaluation — GPT-OSS 120B
-========================================
-Evaluates 570 questions across 57 MMLU subjects (English).
-See mmlu_english_gemma4.py for full details.
-
-Usage:
-  python3 mmlu_english_gptoss.py
-"""
-
 from __future__ import annotations
 
 import glob
@@ -23,7 +13,7 @@ from datasets import load_dataset
 from openai import OpenAI
 from tqdm import tqdm
 
-LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL", "https://litellm.uni-osnabrueck.de/v1")
+LITELLM_BASE_URL = os.getenv("LITELLM_BASE_URL")
 LITELLM_API_KEY  = os.getenv("LITELLM_API_KEY", "")
 MODEL_NAME       = "openai/gpt-oss-120b"
 

@@ -1,29 +1,3 @@
-"""
-combine_scidqa.py
------------------
-Merges all SciDQA result batches for each model, handles re-runs and retries,
-deduplicates by (question_id, condition), and produces:
-  1. A combined JSONL per model  →  analysis/scidqa_<model>_combined.jsonl
-  2. A text report                →  analysis/scidqa_combined_report.txt
-
-Merge order matters — later files overwrite earlier ones for the same
-(id, condition) key so that retries always win over original error records.
-
-Merge order used:
-  Gemma-4 : offset0 → offset500 → … → offset2500 → retries (retries last)
-  GPT-OSS : v1 → v2 → … → v6  (no retries needed)
-  Qwen 3.5: archive/v1-v4 → retries_v1v4 → v5 → v6  (retries replace bad 4k records)
-
-Known remaining issues in Qwen 3.5 (flagged in report, not silently dropped):
-  - 78 null-content errors spread across conditions
-  - 413 thinking-only records (response_text == reasoning) concentrated in
-    no_retrieval (384) and long_context (29) — these need a max_tokens=16384 retry
-
-Usage:
-    python3 combine_scidqa.py          # print report only
-    python3 combine_scidqa.py --save   # also write combined JSONL + report file
-"""
-
 from __future__ import annotations
 
 import argparse
@@ -39,7 +13,6 @@ SCIDQA_DIR  = os.path.join(THESIS_ROOT, "SciDQA")
 
 CONDITIONS = ["no_retrieval", "rag_top3", "rag_top5", "rag_dense", "long_context"]
 
-# ── File discovery ─────────────────────────────────────────────────────────────
 
 def _glob(pattern: str) -> list[str]:
     return sorted(glob.glob(os.path.join(SCIDQA_DIR, pattern)))
@@ -65,8 +38,6 @@ MODEL_FILES: dict[str, list[str]] = {
 }
 
 
-# ── Loaders ────────────────────────────────────────────────────────────────────
-
 def load_and_dedup(files: list[str]) -> tuple[list[dict], int]:
     """
     Load files in order, dedup by (id, condition) keeping the LAST occurrence.
@@ -87,8 +58,6 @@ def load_and_dedup(files: list[str]) -> tuple[list[dict], int]:
     records = list(seen.values())
     return records, total - len(records)
 
-
-# ── Analysis ───────────────────────────────────────────────────────────────────
 
 def _safe_mean(values: list[float]) -> float:
     return statistics.mean(values) if values else 0.0
@@ -146,8 +115,6 @@ def analyse_model(records: list[dict], model_label: str) -> dict:
         "cond_stats"    : cond_stats,
     }
 
-
-# ── Printing ───────────────────────────────────────────────────────────────────
 
 def fmt(v: float, decimals: int = 4) -> str:
     return f"{v:.{decimals}f}"
@@ -265,8 +232,6 @@ def print_comparison_table(all_stats: list[dict]) -> list[str]:
     return lines
 
 
-# ── Save ───────────────────────────────────────────────────────────────────────
-
 def save_combined(records: list[dict], model_key: str) -> str:
     fname = os.path.join(SCRIPT_DIR, f"scidqa_{model_key}_combined.jsonl")
     with open(fname, "w") as f:
@@ -281,8 +246,6 @@ def save_report(all_lines: list[str]) -> str:
         f.write("\n".join(all_lines) + "\n")
     return fname
 
-
-# ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
     parser = argparse.ArgumentParser(description="Combine and analyse SciDQA result batches")

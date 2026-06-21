@@ -1,125 +1,121 @@
 # LLM Evaluation for Scientific QA and MMLU
 
-Master's thesis project evaluating three large language models across two benchmarks under different retrieval conditions.
+Empirical evaluation conducted as part of an M.Sc. thesis at Universität Osnabrück. The study benchmarks three open-source large language models across two tasks, comparing response quality under different retrieval configurations and measuring cross-language generalization.
 
 ## Models
 
-| Model | Provider | Parameters |
-|-------|----------|-----------|
-| Gemma-4 31B FP8 | RedHatAI | 31B |
-| GPT-OSS 120B | OpenAI | 120B |
-| Qwen 3.5 122B FP8 | Qwen | 122B |
+| Model | Parameters |
+|-------|-----------|
+| Gemma-4 31B (FP8) | 31B |
+| GPT-OSS 120B | 120B |
+| Qwen 3.5 122B (FP8) | 122B |
 
----
+All models are accessed through a LiteLLM-compatible API gateway.
 
 ## Benchmarks
 
-### 1. SciDQA — Scientific Document Question Answering
+### SciDQA — Scientific Document QA
 
-Evaluates 2,937 questions from the [SciDQA dataset](https://github.com/yale-nlp/SciDQA) across **five retrieval conditions**:
+2,937 questions from the [SciDQA dataset](https://github.com/yale-nlp/SciDQA), each requiring answers grounded in a specific scientific paper. Models are evaluated across five retrieval conditions:
 
 | Condition | Description |
 |-----------|-------------|
 | `no_retrieval` | Closed-book — model's parametric knowledge only |
-| `rag_top3` | BM25 sparse retrieval, top-3 chunks (replicates SciDQA paper baseline) |
-| `rag_top5` | BM25 sparse retrieval, top-5 chunks (extended baseline) |
-| `rag_dense` | Dense semantic retrieval via `all-MiniLM-L6-v2`, top-3 chunks (thesis contribution) |
-| `long_context` | Full paper text up to 140,000 characters |
+| `rag_top3` | BM25 sparse retrieval, top-3 chunks |
+| `rag_top5` | BM25 sparse retrieval, top-5 chunks |
+| `rag_dense` | Dense semantic retrieval (`all-MiniLM-L6-v2`), top-3 chunks |
+| `long_context` | Full paper text (~140k characters) |
 
-**Chunking**: Paragraph-aware sentence-level sliding window (10 sentences, 1 overlap) matching SciDQA paper Algorithm 1.
+Chunking uses a paragraph-aware sliding window (10 sentences, 1 sentence overlap).
 
-**Inline metrics per record**: ROUGE-1/2/L/avg, n-gram grounding score, no-answer signal, response length, latency, token counts.
+**Evaluation metrics per response:** ROUGE-1/2/L, BERTScore (RoBERTa and SciBERT), NLI faithfulness, LLM-as-judge scores (cross-reference design), and a mismatch condition measuring hallucination behavior under deliberately incorrect context.
 
-### 2. MMLU — Massive Multitask Language Understanding
+### MMLU — Multitask Language Understanding
 
-Evaluates 570 questions across 57 subjects in both **English** and **German** (translated dataset). Structured JSON-output prompt forces a single-letter answer (A/B/C/D).
-
----
+570 questions across 57 subjects in English and German (translated via the [MMMLU dataset](https://huggingface.co/datasets/openai/MMMLU)). Tests factual knowledge and cross-language consistency.
 
 ## Repository Structure
 
 ```
 Thesis/
 ├── SciDQA/
-│   ├── scidqa_gemma4.py          # Full evaluation — Gemma-4
-│   ├── scidqa_gptoss.py          # Full evaluation — GPT-OSS
-│   ├── scidqa_qwen3.5.py         # Full evaluation — Qwen 3.5
-│   ├── run_batches_scidqa_*.py   # Per-model batch runners (500-question batches)
-│   ├── run_all_scidqa.py         # Master orchestration (runs all 3 models sequentially)
-│   ├── retry_errors_gemma4.py    # Retries 502 errors for Gemma-4
-│   ├── retry_bad_qwen_v1v4.py    # Retries null-content records for Qwen (v1–v4)
-│   ├── scidqa_pilot_gptoss.py    # Pilot script (100–500 questions, used for development)
-│   └── data/                     # SciDQADataset.xlsx + papers_fulltext_nougat.pkl (not in repo)
+│   ├── scidqa_gemma4.py           # Evaluation — Gemma-4
+│   ├── scidqa_gptoss.py           # Evaluation — GPT-OSS
+│   ├── scidqa_qwen3.5.py          # Evaluation — Qwen 3.5
+│   ├── scidqa_mismatch.py         # Hallucination/mismatch condition
+│   ├── dataset.py                 # Dataset loading and chunking
+│   ├── run_batches_scidqa_*.py    # Batch orchestration per model
+│   └── run_all_scidqa.py          # Runs all three models sequentially
 │
 ├── MMLU/
-│   ├── mmlu_english_gemma4.py    # MMLU English — Gemma-4
-│   ├── mmlu_english_gptoss.py    # MMLU English — GPT-OSS
-│   ├── mmlu_english_qwen3.5.py   # MMLU English — Qwen 3.5
-│   └── run_batches.py            # Batch runner for English MMLU
+│   ├── mmlu_english_gemma4.py     # English MMLU — Gemma-4
+│   ├── mmlu_english_gptoss.py     # English MMLU — GPT-OSS
+│   ├── mmlu_english_qwen3.5.py    # English MMLU — Qwen 3.5
+│   └── run_batches.py             # Batch orchestration
 │
 ├── MMLU German/
-│   ├── german_gemma4.py          # MMLU German — Gemma-4
-│   ├── german_gptoss.py          # MMLU German — GPT-OSS
-│   ├── german_qwen3.5.py         # MMLU German — Qwen 3.5
-│   └── run_batches_german.py     # Batch runner for German MMLU
+│   ├── german_gemma4.py           # German MMLU — Gemma-4
+│   ├── german_gptoss.py           # German MMLU — GPT-OSS
+│   ├── german_qwen3.5.py          # German MMLU — Qwen 3.5
+│   └── run_batches_german.py      # Batch orchestration
 │
 └── analysis/
-    └── combine_results.py        # Merges batches, deduplicates, generates accuracy report
+    ├── combine_scidqa.py          # Merges SciDQA batches, deduplicates
+    ├── combine_results.py         # Merges MMLU batches, deduplicates
+    ├── bertscore_eval.py          # BERTScore (RoBERTa + SciBERT)
+    ├── nli_faithfulness.py        # NLI faithfulness (RAG conditions)
+    ├── llm_judge.py               # LLM-as-judge cross-reference evaluation
+    ├── cross_language_analysis.py # EN/DE accuracy comparison
+    └── thesis_tables.py           # Summary tables from all results
 ```
-
----
 
 ## Setup
 
 ```bash
-pip install openai pandas rank-bm25 rouge-score sentence-transformers nltk tqdm openpyxl datasets
+pip install -r requirements.txt
 ```
 
-Set your API key:
-```bash
-export LITELLM_API_KEY=your_key_here
-```
-
----
-
-## Running SciDQA
-
-### Single batch (500 questions)
-```bash
-python3 SciDQA/scidqa_gemma4.py --offset 0 --n 500
-```
-
-### Full dataset via batch runner
-```bash
-caffeinate python3 SciDQA/run_batches_scidqa_gemma4.py
-```
-
-### All three models sequentially (overnight)
-```bash
-caffeinate python3 SciDQA/run_all_scidqa.py
-```
-
-### Retry failed records
-```bash
-python3 SciDQA/retry_errors_gemma4.py        # Gemma-4 502 errors
-python3 SciDQA/retry_bad_qwen_v1v4.py        # Qwen null-content records
-```
-
----
-
-## Running MMLU
+Copy `.env.example` to `.env` and set your API credentials:
 
 ```bash
-python3 MMLU/mmlu_english_gemma4.py          # English
-python3 "MMLU German/german_gemma4.py"       # German
+cp .env.example .env
 ```
 
----
+```
+LITELLM_BASE_URL=https://your-litellm-gateway/v1
+LITELLM_API_KEY=your_api_key_here
+```
 
-## Key Design Decisions
+## Running Evaluations
 
-- **Rate limiting**: Token-bucket rate limiter shared across threads (200–300 req/min depending on model)
-- **Concurrency**: `ThreadPoolExecutor` with 40 workers; threads block on the rate limiter
-- **State management**: Batch runners persist progress to JSON state files and resume automatically
-- **Error handling**: `sys.exit(1)` on 401/404 errors; 502s are retried with exponential backoff
-- **Qwen thinking mode**: Qwen 3.5 returns answers in `reasoning_content` when `content` is null; the script falls back gracefully and records are flagged with `is_retry=True` after targeted reruns
+### SciDQA
+
+```bash
+python3 SciDQA/run_batches_scidqa_gemma4.py   # full dataset, single model
+python3 SciDQA/run_all_scidqa.py              # all three models
+```
+
+### MMLU
+
+```bash
+python3 MMLU/mmlu_english_gemma4.py
+python3 "MMLU German/german_gemma4.py"
+```
+
+### Analysis
+
+```bash
+cd analysis
+python3 combine_results.py        # merge and deduplicate raw outputs
+python3 bertscore_eval.py         # compute BERTScore
+python3 nli_faithfulness.py       # NLI faithfulness (RAG conditions only)
+python3 llm_judge.py              # LLM-as-judge (cross-reference)
+python3 thesis_tables.py --save   # generate summary tables
+```
+
+## Design Notes
+
+- **Concurrency**: `ThreadPoolExecutor` with per-model token-bucket rate limiters to stay within API quotas
+- **Fault tolerance**: All scripts resume from the last successful record; transient errors are retried with exponential backoff
+- **LLM-as-judge design**: Cross-reference only — each model is scored by the other two, never itself, to reduce self-preference bias
+- **Qwen thinking mode**: Qwen 3.5 is prompted with `/no_think` during judging to suppress chain-of-thought output and stay within the token budget
